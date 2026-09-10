@@ -80,6 +80,7 @@
 #ifdef WANT_ARM_TRACING
 #include "../wrappers.h"
 #endif
+#include "../tls_patcher.h"
 
 #define TMPFS_MAGIC 0x01021994
 
@@ -3993,6 +3994,54 @@ bool soinfo::prelink_image() {
   return true;
 }
 
+#if defined(__aarch64__)
+extern hybris_tls_patcher_funcs_t _tls_patcher_funcs;
+
+// Android's libcrypto is a BoringSSL FIPS build: a load-time constructor HMACs
+// its own text and aborts on mismatch. The TLS patcher rewrites every
+// `mrs xN, tpidr_el0` in that text, so the check can never pass. Make the
+// exported BORINGSSL_integrity_test() return 1 unconditionally. It attests
+// that the module matches the on-disk image, which we deliberately violate;
+// no crypto behaviour depends on it.
+static void hybris_neuter_boringssl_integrity_test(soinfo* si) {
+  if (_tls_patcher_funcs.patch_tls == nullptr) {
+    return;
+  }
+
+  SymbolName symbol_name("BORINGSSL_integrity_test");
+  const ElfW(Sym)* sym = nullptr;
+  if (!si->find_symbol_by_name(symbol_name, nullptr, &sym) || sym == nullptr) {
+    const char* soname = si->get_soname();
+    if (soname != nullptr && strcmp(soname, "libcrypto.so") == 0) {
+      fprintf(stderr, "HYBRIS: %s has no BORINGSSL_integrity_test; if it is a FIPS "
+              "build its self-test will abort after TLS patching\n", si->get_realpath());
+    }
+    return;
+  }
+
+  uint32_t* code = reinterpret_cast<uint32_t*>(si->resolve_symbol_address(sym));
+  uintptr_t page_start = PAGE_START(reinterpret_cast<uintptr_t>(code));
+  uintptr_t page_end = PAGE_END(reinterpret_cast<uintptr_t>(code) + 8);
+  size_t len = page_end - page_start;
+  void* page = reinterpret_cast<void*>(page_start);
+
+  if (mprotect(page, len, PROT_READ | PROT_WRITE | PROT_EXEC) < 0) {
+    fprintf(stderr, "HYBRIS: can't unprotect BORINGSSL_integrity_test in %s: %s\n",
+            si->get_realpath(), strerror(errno));
+    return;
+  }
+  code[0] = 0x52800020;  // mov w0, #1
+  code[1] = 0xd65f03c0;  // ret
+  __builtin___clear_cache(reinterpret_cast<char*>(code), reinterpret_cast<char*>(code + 2));
+  if (mprotect(page, len, PROT_READ | PROT_EXEC) < 0) {
+    fprintf(stderr, "HYBRIS: can't reprotect BORINGSSL_integrity_test in %s: %s\n",
+            si->get_realpath(), strerror(errno));
+  }
+  fprintf(stderr, "HYBRIS: disabled BoringSSL FIPS integrity test in %s (text was TLS-patched)\n",
+          si->get_realpath());
+}
+#endif
+
 bool soinfo::link_image(const soinfo_list_t& global_group, const soinfo_list_t& local_group,
                         const android_dlextinfo* extinfo, size_t* relro_fd_offset) {
   if (is_image_linked()) {
@@ -4113,6 +4162,10 @@ bool soinfo::link_image(const soinfo_list_t& global_group, const soinfo_list_t& 
 #endif
 
   DEBUG("[ finished linking %s ]", get_realpath());
+
+#if defined(__aarch64__)
+  hybris_neuter_boringssl_integrity_test(this);
+#endif
 
 #if !defined(__LP64__)
   if (has_text_relocations) {
