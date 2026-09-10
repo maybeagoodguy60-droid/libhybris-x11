@@ -75,6 +75,8 @@ static EGLBoolean  (*_eglSwapBuffers)(EGLDisplay dpy, EGLSurface surface) = NULL
 
 static EGLImageKHR (*_eglCreateImageKHR)(EGLDisplay dpy, EGLContext ctx, EGLenum target, EGLClientBuffer buffer, const EGLint *attrib_list) = NULL;
 static EGLBoolean (*_eglDestroyImageKHR) (EGLDisplay dpy, EGLImageKHR image) = NULL;
+static EGLImage (*_eglCreateImage)(EGLDisplay dpy, EGLContext ctx, EGLenum target, EGLClientBuffer buffer, const EGLAttrib *attrib_list) = NULL;
+static EGLBoolean (*_eglDestroyImage)(EGLDisplay dpy, EGLImage image) = NULL;
 
 static void (*_glEGLImageTargetTexture2DOES) (GLenum target, GLeglImageOES image) = NULL;
 static void (*_glEGLImageTargetRenderbufferStorageOES) (GLenum target, GLeglImageOES image) = NULL;
@@ -382,6 +384,18 @@ EGLSurface eglCreatePlatformWindowSurface(EGLDisplay dpy, EGLConfig config,
 	return eglCreateWindowSurface(dpy, config, (uintptr_t) native_window, (const EGLint *) attrib_list);
 }
 
+EGLSurface eglCreatePlatformPixmapSurface(EGLDisplay dpy, EGLConfig config,
+		void *native_pixmap, const EGLAttrib *attrib_list)
+{
+	/* Same shape as eglCreatePlatformWindowSurface() above, and the same
+	 * target eglCreatePlatformPixmapSurfaceEXT is already aliased to.
+	 * Android EGL has no native pixmap type, so this is expected to fail
+	 * with EGL_BAD_MATCH when actually called — but it still has to exist,
+	 * because clients link it unconditionally and a missing symbol is a
+	 * hard load failure rather than a recoverable EGL error. */
+	return eglCreatePixmapSurface(dpy, config, (uintptr_t) native_pixmap, (const EGLint *) attrib_list);
+}
+
 static EGLSurface _my_eglCreatePlatformWindowSurfaceEXT(EGLDisplay dpy, EGLConfig config,
 		void *native_window, const EGLint *attrib_list)
 {
@@ -559,6 +573,73 @@ EGLBoolean _my_eglDestroyImageKHR(EGLDisplay dpy, EGLImageKHR image)
 	return ret;
 }
 
+/*
+ * EGL 1.5 core entry points below. eglQueryString(EGL_VERSION) forwards
+ * straight to Android EGL, which reports 1.5, so all of these have to be
+ * real exported symbols: a client that links one and doesn't find it fails
+ * to load outright (distros build with -z now), which is far worse than the
+ * runtime EGL error it would have gotten. Only eglGetPlatformDisplay() and
+ * eglCreatePlatformWindowSurface() were here before.
+ */
+
+EGLImage eglCreateImage(EGLDisplay dpy, EGLContext ctx, EGLenum target,
+		EGLClientBuffer buffer, const EGLAttrib *attrib_list)
+{
+	HYBRIS_DLSYSM(egl, &_eglCreateImage, "eglCreateImage");
+	struct _EGLDisplay *display = hybris_egl_display_get_mapping(dpy);
+	EGLContext newctx = ctx;
+	EGLenum newtarget = target;
+	EGLClientBuffer newbuffer = buffer;
+
+	/* ws_passthroughImageKHR() is typed for an EGLint attrib list, but it
+	 * only ever *clears* that list (the EGL_WAYLAND_BUFFER_WL rewrite drops
+	 * the caller's attribs) and never reads an entry. So hand it a non-NULL
+	 * marker and check whether the marker survived, rather than narrowing
+	 * the caller's EGLAttrib array to EGLint. */
+	const EGLint attribs_untouched = EGL_NONE;
+	const EGLint *ws_attribs = &attribs_untouched;
+
+	ws_passthroughImageKHR(&newctx, &newtarget, &newbuffer, &ws_attribs);
+
+	EGLImage ei = (*_eglCreateImage)(dpy, newctx, newtarget, newbuffer,
+			ws_attribs ? attrib_list : NULL);
+
+	if (ei == EGL_NO_IMAGE) {
+		return EGL_NO_IMAGE;
+	}
+
+	/* Same wrapper the KHR path hands out, so images made either way can be
+	 * consumed by _my_glEGLImageTargetTexture2DOES() and friends. */
+	struct egl_image *image;
+	image = malloc(sizeof *image);
+	image->egl_image = ei;
+	image->target = target;
+	image->ws_dpy = display;
+	image->ws_buffer = newbuffer;
+
+	return (EGLImage)image;
+}
+
+EGLBoolean eglDestroyImage(EGLDisplay dpy, EGLImage image)
+{
+	HYBRIS_DLSYSM(egl, &_eglDestroyImage, "eglDestroyImage");
+	struct egl_image *img = image;
+	EGLBoolean ret = (*_eglDestroyImage)(dpy, img ? img->egl_image : NULL);
+	if (ret == EGL_TRUE) {
+		free(img);
+		return EGL_TRUE;
+	}
+	return ret;
+}
+
+/* Sync objects need no libhybris bookkeeping — nothing here wraps EGLSync,
+ * the same way the KHR sync entry points are left to Android EGL. */
+HYBRIS_IMPLEMENT_FUNCTION3(egl, EGLSync, eglCreateSync, EGLDisplay, EGLenum, const EGLAttrib *);
+HYBRIS_IMPLEMENT_FUNCTION2(egl, EGLBoolean, eglDestroySync, EGLDisplay, EGLSync);
+HYBRIS_IMPLEMENT_FUNCTION4(egl, EGLint, eglClientWaitSync, EGLDisplay, EGLSync, EGLint, EGLTime);
+HYBRIS_IMPLEMENT_FUNCTION4(egl, EGLBoolean, eglGetSyncAttrib, EGLDisplay, EGLSync, EGLint, EGLAttrib *);
+HYBRIS_IMPLEMENT_FUNCTION3(egl, EGLBoolean, eglWaitSync, EGLDisplay, EGLSync, EGLint);
+
 struct FuncNamePair {
 	const char * name;
 	__eglMustCastToProperFunctionPointerType func;
@@ -607,6 +688,14 @@ static struct FuncNamePair _eglHybrisOverrideFunctions[] = {
 	OVERRIDE_SAMENAME(eglTerminate),
 	OVERRIDE_SAMENAME(eglCreateWindowSurface),
 	OVERRIDE_SAMENAME(eglCreatePlatformWindowSurface),
+	OVERRIDE_SAMENAME(eglCreatePlatformPixmapSurface),
+	OVERRIDE_SAMENAME(eglCreateImage),
+	OVERRIDE_SAMENAME(eglDestroyImage),
+	OVERRIDE_SAMENAME(eglCreateSync),
+	OVERRIDE_SAMENAME(eglDestroySync),
+	OVERRIDE_SAMENAME(eglClientWaitSync),
+	OVERRIDE_SAMENAME(eglGetSyncAttrib),
+	OVERRIDE_SAMENAME(eglWaitSync),
 	OVERRIDE_SAMENAME(eglDestroySurface),
 	OVERRIDE_SAMENAME(eglSwapInterval),
 	OVERRIDE_SAMENAME(eglCreateContext),
