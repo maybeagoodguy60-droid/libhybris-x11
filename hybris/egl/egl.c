@@ -320,15 +320,42 @@ const char * eglQueryString(EGLDisplay dpy, EGLint name)
 {
 	HYBRIS_DLSYSM(egl, &_eglQueryString, "eglQueryString");
 
-#ifdef WANT_WAYLAND
+#if defined(WANT_WAYLAND) || defined(WANT_X11)
+	/*
+	 * Advertise the EGL_KHR/EXT_platform_base entry points we actually
+	 * implement (see _eglHybrisOverrideFunctions below) plus the platform
+	 * tags for the native window systems we can drive. Clients such as
+	 * GTK3/GDK only look for EGL_KHR_platform_base in the *client*
+	 * extension string to decide whether they may use
+	 * eglGetPlatformDisplay(); if it is absent they fall back to GLX.
+	 *
+	 * Everything advertised here is genuinely routed by
+	 * __eglHybrisGetPlatformDisplayCommon(), so this is not a paper-only
+	 * extension list.
+	 */
 	if (dpy == EGL_NO_DISPLAY && name == EGL_EXTENSIONS) {
 		const char *ret = _eglQueryString(dpy, name);
 		static char eglextensionsbuf[2048];
-		snprintf(eglextensionsbuf, 2046, "%s %s", ret,
-			"EGL_EXT_client_extensions EGL_EXT_platform_wayland EGL_KHR_platform_wayland"
-		);
-		ret = eglextensionsbuf;
-		return ret;
+		char platform_exts[512];
+
+		platform_exts[0] = '\0';
+#ifdef WANT_WAYLAND
+		strncat(platform_exts,
+			" EGL_EXT_platform_wayland EGL_KHR_platform_wayland",
+			sizeof(platform_exts) - strlen(platform_exts) - 1);
+#endif
+#ifdef WANT_X11
+		strncat(platform_exts,
+			" EGL_EXT_platform_x11 EGL_KHR_platform_x11",
+			sizeof(platform_exts) - strlen(platform_exts) - 1);
+#endif
+		strncat(platform_exts,
+			" EGL_KHR_platform_base EGL_EXT_platform_base",
+			sizeof(platform_exts) - strlen(platform_exts) - 1);
+
+		snprintf(eglextensionsbuf, sizeof(eglextensionsbuf) - 1,
+			"%s%s EGL_EXT_client_extensions", ret, platform_exts);
+		return eglextensionsbuf;
 	}
 #endif
 
@@ -361,7 +388,15 @@ EGLSurface eglCreateWindowSurface(EGLDisplay dpy, EGLConfig config,
 
 	HYBRIS_TRACE_BEGIN("hybris-egl", "eglCreateWindowSurface", "");
 	struct _EGLDisplay *display = hybris_egl_display_get_mapping(dpy);
+	if (!display) {
+		__eglHybrisSetError(EGL_BAD_DISPLAY);
+		return EGL_NO_SURFACE;
+	}
 	win = ws_CreateWindow(win, display);
+	if (!win) {
+		__eglHybrisSetError(EGL_BAD_NATIVE_WINDOW);
+		return EGL_NO_SURFACE;
+	}
 
 	assert(((struct ANativeWindow *) win)->common.magic == ANDROID_NATIVE_WINDOW_MAGIC);
 
