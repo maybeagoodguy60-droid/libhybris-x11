@@ -1,0 +1,108 @@
+name: Build libhybris
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - x11-generic-wsi
+    paths:
+      - 'hybris/**'
+      - 'android-headers/**'
+      - '.github/workflows/build-libhybris.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Cross-build aarch64 libhybris
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host toolchain and headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential autoconf automake libtool libtool-bin pkg-config \
+            file patchelf \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu libc6-arm64-cross linux-libc-dev-arm64-cross \
+            libwayland-dev libwayland-egl-backend-dev wayland-protocols \
+            libx11-dev libx11-xcb-dev libxcb1-dev libxcb-dri3-dev libxcb-present-dev \
+            libvulkan-dev
+
+      - name: Cache build tree
+        uses: actions/cache@v4
+        with:
+          path: hybris/build
+          key: libhybris-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            libhybris-${{ runner.os }}-
+
+      - name: Configure
+        working-directory: hybris
+        run: |
+          ./autogen.sh
+          ./configure \
+            --host=aarch64-linux-gnu \
+            --prefix=/usr/lib/hybris \
+            --libdir=/usr/lib/hybris \
+            --with-android-headers="$GITHUB_WORKSPACE/android-headers" \
+            --enable-arch=arm64 \
+            --enable-wayland \
+            --enable-x11 \
+            --disable-wayland_serverside_buffers \
+            --enable-adreno-quirks \
+            --enable-mali-quirks \
+            --enable-property-cache \
+            --with-default-vulkan-platform=x11 \
+            --with-default-hybris-ld-library-path=/vendor/lib64/egl:/vendor/lib64/hw:/vendor/lib64:/system/lib64:/apex/com.android.runtime/lib64 \
+            CC=aarch64-linux-gnu-gcc \
+            CXX=aarch64-linux-gnu-g++ \
+            'CPPFLAGS=-idirafter /usr/include'
+
+      - name: Build
+        working-directory: hybris
+        run: make -j"$(nproc)"
+
+      # Ship the DESTDIR install as a symlink-preserving tar, the same shape
+      # the Android app extracts at runtime. .la files, .pc files and headers
+      # all reference host paths, so they are stripped.
+      - name: Package
+        working-directory: hybris
+        run: |
+          make DESTDIR="$GITHUB_WORKSPACE/hybris/build/stage" install
+          cd build/stage/usr/lib/hybris
+          tar --format=ustar \
+            --exclude='*.la' --exclude='pkgconfig' --exclude='include' --exclude='bin' \
+            -czf "$GITHUB_WORKSPACE/libhybris-arm64.tar.gz" .
+          ls -la "$GITHUB_WORKSPACE/libhybris-arm64.tar.gz"
+
+      - name: Verify the artefacts we depend on are present
+        run: |
+          set -e
+          T=$(mktemp -d)
+          tar xzf libhybris-arm64.tar.gz -C "$T"
+          for f in \
+            libEGL.so.1 libGLESv1_CM.so.1 libGLESv2.so.2 libvulkan.so.1 \
+            libhybris-common.so.1 libhybris/linker/q.so \
+            libhybris/eglplatform_x11.so libhybris/eglplatform_wayland.so \
+            libhybris/vulkanplatform_x11.so libhybris/vulkanplatform_wayland.so \
+            gl-shims/libGL.so.1
+          do
+            test -e "$T/$f" || { echo "MISSING: $f"; exit 1; }
+            echo "  ok  $f"
+          done
+
+      - name: Checksums
+        run: sha256sum libhybris-arm64.tar.gz > sha256sums.txt && cat sha256sums.txt
+
+      - name: Upload libhybris
+        uses: actions/upload-artifact@v4
+        with:
+          name: libhybris-arm64
+          path: |
+            libhybris-arm64.tar.gz
+            sha256sums.txt
+          retention-days: 90
