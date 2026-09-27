@@ -172,7 +172,22 @@ X11NativeWindow::X11NativeWindow(xcb_connection_t *conn,
     pthread_mutex_init(&m_mutex, nullptr);
     if (present_events)
         setupEventChannel();
-    setBufferCount(3);
+
+    /*
+     * Number of buffers in flight. Three is the usual Android default, but
+     * this display is not zero-copy: the X server reads each presented
+     * frame back from memory, and that read is much more expensive right
+     * after the GPU has written the buffer than it is otherwise. Extra
+     * buffers let the server chew on an older frame while the GPU works on
+     * a newer one instead of every frame serialising render-then-read.
+     */
+    int buffers = 4;
+    if (const char *e = getenv("HYBRIS_X11_BUFFERS")) {
+        int v = atoi(e);
+        if (v >= 2 && v <= 12)
+            buffers = v;
+    }
+    setBufferCount(buffers);
 }
 
 void X11NativeWindow::setupEventChannel()
