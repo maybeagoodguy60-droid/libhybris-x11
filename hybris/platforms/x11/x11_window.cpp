@@ -159,7 +159,7 @@ X11NativeWindow::X11NativeWindow(xcb_connection_t *conn,
     , m_xwin(xwin)
     , m_width(w ? w : 1)
     , m_height(h ? h : 1)
-    , m_format(HAL_PIXEL_FORMAT_RGBA_8888)
+    , m_format(HAL_PIXEL_FORMAT_BGRA_8888)
     , m_usage(GRALLOC_USAGE_HW_RENDER | GRALLOC_USAGE_HW_TEXTURE)
     , m_swap_interval(1)
     , m_events_enabled(false)
@@ -332,7 +332,23 @@ int X11NativeWindow::setSwapInterval(int interval)
 int X11NativeWindow::setBuffersFormat(int fmt)
 {
     lock();
-    if (fmt != m_format)
+    /*
+     * The EGL driver asks for RGBA_8888, because that is what its own
+     * config advertises. Termux:X11 cannot be told that.
+     *
+     * Its compositor decides how to convert a buffer by format: it treats
+     * anything that is not B8G8R8A8 as "RGBA" and runs the on-screen
+     * draw through a .bgra swizzle shader. Handing it an R8G8B8A8 buffer
+     * therefore makes it swap channels that were already correct, and
+     * every client renders with red and blue exchanged.
+     *
+     * BGRA_8888 is the honest answer, not a workaround: it is what
+     * Android uses for display buffers, and it is the format Termux:X11's
+     * own buffer paths allocate, so its compositor needs no conversion.
+     * Any other request is still honoured; only the driver's RGBA
+     * default is declined.
+     */
+    if (fmt != HAL_PIXEL_FORMAT_RGBA_8888 && fmt != m_format)
         m_format = fmt;
     unlock();
     return NO_ERROR;
