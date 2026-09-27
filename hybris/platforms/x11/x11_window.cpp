@@ -97,10 +97,23 @@ X11NativeWindowBuffer::X11NativeWindowBuffer(unsigned int w,
         desc.height = h ? h : 1;
         desc.layers = 1;
         desc.format = fmt;
+        /*
+         * GPU_SAMPLED_IMAGE + GPU_FRAMEBUFFER because the client renders
+         * with EGL/GLES or Vulkan and the buffer is consumed as a texture.
+         * CPU_READ_OFTEN because the X server reads the pixels back when it
+         * copies the presented frame.
+         *
+         * CPU_WRITE_OFTEN is deliberately NOT requested. Nothing on this
+         * path writes the buffer from the CPU, and asking for it makes the
+         * gralloc allocator treat the memory as CPU-write-heavy, which
+         * measurably slows the X server's read of a buffer the GPU has
+         * just written. If a client genuinely needs eglMap()/glMapBuffer on
+         * this surface it falls back to its own copy, which is still
+         * correct, just not the fast path.
+         */
         desc.usage = AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
                      AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
-                     AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
-                     AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN;
+                     AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN;
         if (allocate_buffer(&desc, &ahb) == 0 && ahb) {
             AHardwareBuffer_Desc actual = {};
             describe_buffer(ahb, &actual);
@@ -544,7 +557,23 @@ int X11NativeWindow::presentBuffer(X11NativeWindowBuffer *buffer)
     if (createPixmap(buffer) != 0)
         return -1;
 
-    xcb_void_cookie_t cookie = xcb_present_pixmap_checked(
+    /*
+     * Fire the Present and do not wait for the server's reply.
+     *
+     * The previous code used xcb_present_pixmap_checked() plus
+     * xcb_request_check(), which blocks until the X server answers. That
+     * puts a full round trip on the critical path of every single frame,
+     * and the copy the server then does is the expensive part anyway.
+     *
+     * Correctness does not need the synchronous answer: a presented
+     * buffer is recycled when its target_msc comes back as a Present
+     * CompleteNotify/IdleNotify event, which dequeueBuffer() already
+     * tracks by serial. Server-side errors surface asynchronously
+     * instead, via xcb_connection_has_error() in dequeueBuffer(), which
+     * already force-frees every outstanding buffer and rebuilds the
+     * window.
+     */
+    xcb_present_pixmap(
         m_conn,
         m_xwin,
         buffer->pixmap,
@@ -563,11 +592,9 @@ int X11NativeWindow::presentBuffer(X11NativeWindowBuffer *buffer)
         0,
         nullptr);
     xcb_flush(m_conn);
-    xcb_generic_error_t *error = xcb_request_check(m_conn, cookie);
-    if (error) {
-        HYBRIS_ERROR("x11-platform: Present failed (error %d)",
-                     error->error_code);
-        free(error);
+
+    if (xcb_connection_has_error(m_conn)) {
+        HYBRIS_ERROR("x11-platform: X connection lost while presenting");
         return -1;
     }
     return 0;
