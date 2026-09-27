@@ -116,16 +116,20 @@ jobs:
           set -e
           T=$(mktemp -d)
           tar xzf libhybris-arm64.tar.gz -C "$T"
+          # gl-shims/ is deliberately not in this list: it ships from the
+          # tawc-portable packaging, not from libhybris itself, and the
+          # libGL.so.1 there is just a symlink onto libGLESv2.
           for f in \
             libEGL.so.1 libGLESv1_CM.so.1 libGLESv2.so.2 libvulkan.so.1 \
             libhybris-common.so.1 libhybris/linker/q.so \
             libhybris/eglplatform_x11.so libhybris/eglplatform_wayland.so \
-            libhybris/vulkanplatform_x11.so libhybris/vulkanplatform_wayland.so \
-            gl-shims/libGL.so.1
+            libhybris/vulkanplatform_x11.so libhybris/vulkanplatform_wayland.so
           do
             test -e "$T/$f" || { echo "MISSING: $f"; exit 1; }
             echo "  ok  $f"
           done
+          echo "--- tree ---"
+          find "$T" -maxdepth 2 -name '*.so*' | sed "s|$T/||" | sort | head -30
 
       - name: Checksums
         run: sha256sum libhybris-arm64.tar.gz > sha256sums.txt && cat sha256sums.txt
