@@ -24,14 +24,23 @@ jobs:
       # pkg-config results both have to be aarch64. The runner only has
       # x86_64 packages, so arm64 is added to apt and every -dev package we
       # need is pulled in explicitly with the :arm64 suffix.
+      # The runner's default sources point at azure.archive.ubuntu.com, which
+      # carries no arm64 Packages index, so apt silently Ign: every arm64
+      # lookup. Replace them outright and take amd64 from archive and arm64
+      # from ports, which is where Ubuntu actually publishes arm64.
       - name: Enable arm64 packages
         run: |
           sudo dpkg --add-architecture arm64
-          sudo tee /etc/apt/sources.list.d/arm64.list >/dev/null <<'EOF'
+          sudo mv /etc/apt/sources.list.d/ubuntu.sources \
+                   /etc/apt/sources.list.d/ubuntu.sources.disabled
+          sudo rm -f /etc/apt/sources.list.d/arm64.list
+          sudo tee /etc/apt/sources.list.d/cross.list >/dev/null <<'EOF'
           deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble main universe
           deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-updates main universe
-          deb [arch=arm64] http://archive.ubuntu.com/ubuntu noble main universe
-          deb [arch=arm64] http://archive.ubuntu.com/ubuntu noble-updates main universe
+          deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-security main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main universe
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main universe
           EOF
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
