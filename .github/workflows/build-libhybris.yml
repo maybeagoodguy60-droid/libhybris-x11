@@ -20,17 +20,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install host toolchain and headers
+      # libhybris is a glibc-side cross build, so the compiler and the
+      # pkg-config results both have to be aarch64. The runner only has
+      # x86_64 packages, so arm64 is added to apt and every -dev package we
+      # need is pulled in explicitly with the :arm64 suffix.
+      - name: Enable arm64 packages
         run: |
+          sudo dpkg --add-architecture arm64
+          sudo tee /etc/apt/sources.list.d/arm64.list >/dev/null <<'EOF'
+          deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble main universe
+          deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-updates main universe
+          deb [arch=arm64] http://archive.ubuntu.com/ubuntu noble main universe
+          deb [arch=arm64] http://archive.ubuntu.com/ubuntu noble-updates main universe
+          EOF
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential autoconf automake libtool libtool-bin pkg-config \
-            file patchelf \
+            build-essential autoconf automake libtool libtool-bin pkg-config file patchelf \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu libc6-arm64-cross linux-libc-dev-arm64-cross \
-            libwayland-dev libwayland-egl-backend-dev wayland-protocols \
-            libx11-dev libx11-xcb-dev libxcb1-dev libxcb-dri3-dev libxcb-present-dev \
-            libvulkan-dev
+            libwayland-dev:arm64 libwayland-egl-backend-dev:arm64 \
+            libx11-dev:arm64 libx11-xcb-dev:arm64 \
+            libxcb1-dev:arm64 libxcb-dri3-dev:arm64 libxcb-present-dev:arm64 \
+            libvulkan-dev:arm64 wayland-protocols
+          echo "--- sanity: aarch64 .pc files resolve ---"
+          PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
+            pkg-config --exists wayland-client x11 xcb-dri3 xcb-present && echo "pkg-config OK"
 
       - name: Cache build tree
         uses: actions/cache@v4
@@ -42,6 +56,8 @@ jobs:
 
       - name: Configure
         working-directory: hybris
+        env:
+          PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
         run: |
           ./autogen.sh
           ./configure \
@@ -65,6 +81,13 @@ jobs:
       - name: Build
         working-directory: hybris
         run: make -j"$(nproc)"
+
+      - name: Sanity-check the cross output
+        run: |
+          file hybris/vulkan/.libs/libvulkan.so.1.2.183 2>/dev/null || \
+          file hybris/vulkan/.libs/libvulkan.so.1.*
+          file hybris/.libs/libEGL.so.1.0.0
+          readelf -d hybris/egl/platforms/x11/.libs/eglplatform_x11.so | grep -i needed | head -5
 
       # Ship the DESTDIR install as a symlink-preserving tar, the same shape
       # the Android app extracts at runtime. .la files, .pc files and headers
