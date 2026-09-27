@@ -33,7 +33,7 @@ static void _init_ws()
         vulkan_platform=getenv("HYBRIS_VULKANPLATFORM");
 
         if (vulkan_platform == NULL)
-            vulkan_platform = "wayland";
+            vulkan_platform = DEFAULT_VULKAN_PLATFORM;
 
         const char *vulkanplatform_dir = PKGLIBDIR;
         const char *user_vulkanplatform_dir = getauxval(AT_SECURE)
@@ -82,6 +82,39 @@ VkBool32 ws_vkGetPhysicalDeviceWaylandPresentationSupportKHR(VkPhysicalDevice ph
     _init_ws();
     return ws->vkGetPhysicalDeviceWaylandPresentationSupportKHR(physicalDevice, queueFamilyIndex, display);
 }
+#endif
+
+#ifdef WANT_X11
+VkResult ws_vkCreateXcbSurfaceKHR(VkInstance instance,
+        const VkXcbSurfaceCreateInfoKHR* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSurfaceKHR* pSurface)
+{
+    _init_ws();
+    return ws->vkCreateXcbSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
+}
+
+VkResult ws_vkCreateXlibSurfaceKHR(VkInstance instance,
+        const VkXlibSurfaceCreateInfoKHR* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSurfaceKHR* pSurface)
+{
+    _init_ws();
+    return ws->vkCreateXlibSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
+}
+
+VkBool32 ws_vkGetPhysicalDeviceXcbPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, xcb_connection_t* connection, uint32_t visual_id)
+{
+    _init_ws();
+    return ws->vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, queueFamilyIndex, connection, visual_id);
+}
+
+VkBool32 ws_vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, Display* dpy, VisualID visualID)
+{
+    _init_ws();
+    return ws->vkGetPhysicalDeviceXlibPresentationSupportKHR(physicalDevice, queueFamilyIndex, dpy, visualID);
+}
+#endif
 
 void ws_vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface, const VkAllocationCallbacks* pAllocator)
 {
@@ -102,7 +135,6 @@ void ws_prepareSwapchain(const VkSwapchainCreateInfoKHR* pCreateInfo)
     if (ws->prepareSwapchain)
         ws->prepareSwapchain(pCreateInfo);
 }
-#endif
 
 void ws_vkSetInstanceProcAddrFunc(PFN_vkVoidFunction addr)
 {

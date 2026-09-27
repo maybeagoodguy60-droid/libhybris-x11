@@ -336,6 +336,12 @@ struct ws_module ws_module_info = {
     waylandws_vkCreateInstance,
     waylandws_vkCreateWaylandSurfaceKHR,
     waylandws_vkGetPhysicalDeviceWaylandPresentationSupportKHR,
+#ifdef WANT_X11
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+#endif
     waylandws_vkDestroySurfaceKHR,
     waylandws_patchSurfaceCapabilities,
     waylandws_prepareSwapchain,

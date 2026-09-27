@@ -18,8 +18,23 @@
 /* For RTLD_DEFAULT */
 #define _GNU_SOURCE
 
+#include "config.h"
+
 #define VK_USE_PLATFORM_ANDROID_KHR 1
 #define VK_USE_PLATFORM_WAYLAND_KHR 1
+#if defined(WANT_X11)
+#define VK_USE_PLATFORM_XLIB_KHR 1
+#define VK_USE_PLATFORM_XCB_KHR 1
+#include <X11/Xlib.h>
+#include <xcb/xcb.h>
+#endif
+
+/* Platforms that provide their own surface/WSI implementation need the
+ * surface wrappers, swapchain preparation and surface capability patching
+ * below to be compiled in. */
+#if defined(WANT_WAYLAND) || defined(WANT_X11)
+#define WANT_VULKAN_PLATFORM_WSI 1
+#endif
 
 #include <vulkan/vulkan.h>
 #include <dlfcn.h>
@@ -28,7 +43,6 @@
 
 #include <hybris/common/binding.h>
 #include <hybris/common/floating_point_abi.h>
-#include "config.h"
 #include "logging.h"
 #include "ws.h"
 
@@ -128,6 +142,7 @@ VkResult vkEnumerateInstanceExtensionProperties(const char* pLayerName, uint32_t
     return ws_vkEnumerateInstanceExtensionProperties(pLayerName, pPropertyCount, pProperties);
 }
 
+#ifdef WANT_VULKAN_PLATFORM_WSI
 #ifdef WANT_WAYLAND
 VkResult vkCreateWaylandSurfaceKHR(VkInstance instance,
         const VkWaylandSurfaceCreateInfoKHR* pCreateInfo,
@@ -141,30 +156,39 @@ VkBool32 vkGetPhysicalDeviceWaylandPresentationSupportKHR(VkPhysicalDevice physi
 {
     return ws_vkGetPhysicalDeviceWaylandPresentationSupportKHR(physicalDevice, queueFamilyIndex, display);
 }
+#endif
+
+#ifdef WANT_X11
+VkResult vkCreateXcbSurfaceKHR(VkInstance instance,
+        const VkXcbSurfaceCreateInfoKHR* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSurfaceKHR* pSurface)
+{
+    return ws_vkCreateXcbSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
+}
+
+VkResult vkCreateXlibSurfaceKHR(VkInstance instance,
+        const VkXlibSurfaceCreateInfoKHR* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSurfaceKHR* pSurface)
+{
+    return ws_vkCreateXlibSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
+}
+
+VkBool32 vkGetPhysicalDeviceXcbPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, xcb_connection_t* connection, uint32_t visual_id)
+{
+    return ws_vkGetPhysicalDeviceXcbPresentationSupportKHR(physicalDevice, queueFamilyIndex, connection, visual_id);
+}
+
+VkBool32 vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, Display* dpy, VisualID visualID)
+{
+    return ws_vkGetPhysicalDeviceXlibPresentationSupportKHR(physicalDevice, queueFamilyIndex, dpy, visualID);
+}
+#endif
 
 void vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface, const VkAllocationCallbacks* pAllocator)
 {
     ws_vkDestroySurfaceKHR(instance, surface, pAllocator);
-}
-
-VkResult vkCreateXlibSurfaceKHR(VkInstance instance, const void* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface)
-{
-    return VK_ERROR_EXTENSION_NOT_PRESENT;
-}
-
-VkBool32 vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, void* dpy, unsigned long visualID)
-{
-    return VK_FALSE;
-}
-
-VkResult vkCreateXcbSurfaceKHR(VkInstance instance, const void* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface)
-{
-    return VK_ERROR_EXTENSION_NOT_PRESENT;
-}
-
-VkBool32 vkGetPhysicalDeviceXcbPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, void* connection, uint32_t visual_id)
-{
-    return VK_FALSE;
 }
 #else
 VULKAN_IDLOAD(vkDestroySurfaceKHR);
@@ -187,6 +211,18 @@ PFN_vkVoidFunction vkGetInstanceProcAddr(VkInstance instance, const char* pName)
         return (PFN_vkVoidFunction)vkCreateWaylandSurfaceKHR;
     } else if (!strcmp(pName, "vkGetPhysicalDeviceWaylandPresentationSupportKHR")) {
         return (PFN_vkVoidFunction)vkGetPhysicalDeviceWaylandPresentationSupportKHR;
+#endif
+#ifdef WANT_X11
+    } else if (!strcmp(pName, "vkCreateXcbSurfaceKHR")) {
+        return (PFN_vkVoidFunction)vkCreateXcbSurfaceKHR;
+    } else if (!strcmp(pName, "vkCreateXlibSurfaceKHR")) {
+        return (PFN_vkVoidFunction)vkCreateXlibSurfaceKHR;
+    } else if (!strcmp(pName, "vkGetPhysicalDeviceXcbPresentationSupportKHR")) {
+        return (PFN_vkVoidFunction)vkGetPhysicalDeviceXcbPresentationSupportKHR;
+    } else if (!strcmp(pName, "vkGetPhysicalDeviceXlibPresentationSupportKHR")) {
+        return (PFN_vkVoidFunction)vkGetPhysicalDeviceXlibPresentationSupportKHR;
+#endif
+#ifdef WANT_VULKAN_PLATFORM_WSI
     } else if (!strcmp(pName, "vkDestroySurfaceKHR")) {
         return (PFN_vkVoidFunction)vkDestroySurfaceKHR;
     } else if (!strcmp(pName, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")) {
@@ -203,7 +239,7 @@ PFN_vkVoidFunction vkGetInstanceProcAddr(VkInstance instance, const char* pName)
     return (*_vkGetInstanceProcAddr)(instance, pName);
 }
 
-#ifdef WANT_WAYLAND
+#ifdef WANT_VULKAN_PLATFORM_WSI
 static PFN_vkVoidFunction (*_real_vkGetDeviceProcAddr)(VkDevice device, const char* pName) = NULL;
 
 PFN_vkVoidFunction vkGetDeviceProcAddr(VkDevice device, const char* pName)
@@ -432,7 +468,7 @@ VULKAN_IDLOAD(vkGetPhysicalDeviceSurfaceSupportKHR);
 VULKAN_IDLOAD(vkGetPhysicalDeviceSurfaceFormatsKHR);
 VULKAN_IDLOAD(vkGetPhysicalDeviceSurfacePresentModesKHR);
 
-#ifdef WANT_WAYLAND
+#ifdef WANT_VULKAN_PLATFORM_WSI
 static VkResult (*_real_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)(VkPhysicalDevice, VkSurfaceKHR, VkSurfaceCapabilitiesKHR*) = NULL;
 
 VkResult vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR* pSurfaceCapabilities)
@@ -535,7 +571,7 @@ VULKAN_IDLOAD(vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR);
 VULKAN_IDLOAD(vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR);
 VULKAN_IDLOAD(vkAcquireProfilingLockKHR);
 VULKAN_IDLOAD(vkReleaseProfilingLockKHR);
-#ifdef WANT_WAYLAND
+#ifdef WANT_VULKAN_PLATFORM_WSI
 static VkResult (*_real_vkGetPhysicalDeviceSurfaceCapabilities2KHR)(VkPhysicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR*, VkSurfaceCapabilities2KHR*) = NULL;
 
 VkResult vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR* pSurfaceInfo, VkSurfaceCapabilities2KHR* pSurfaceCapabilities)

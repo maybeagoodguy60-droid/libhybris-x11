@@ -94,12 +94,14 @@ AC_ARG_ENABLE(wayland,
 AM_CONDITIONAL( [WANT_WAYLAND], [test x"$wayland" = x"yes"])
 
 AC_ARG_ENABLE(x11,
-  [  --enable-x11                Enable X11 EGL platform via TAWC-DRI (default=disabled)],
+  [  --enable-x11                Enable X11 EGL and Vulkan platforms using DRI3/Present (default=disabled)],
   [x11=$enableval
-	PKG_CHECK_MODULES(X11, x11,, exit)
-	PKG_CHECK_MODULES(XCB, xcb,, exit)
-	PKG_CHECK_MODULES(X11_XCB, x11-xcb,, exit)
-	AC_DEFINE(WANT_X11, [], [We want X11 EGL platform support])
+		PKG_CHECK_MODULES(X11, x11,, exit)
+		PKG_CHECK_MODULES(XCB, xcb,, exit)
+		PKG_CHECK_MODULES(X11_XCB, x11-xcb,, exit)
+		PKG_CHECK_MODULES(DRI3, xcb-dri3,, exit)
+		PKG_CHECK_MODULES(PRESENT, xcb-present,, exit)
+		AC_DEFINE(WANT_X11, [], [We want X11 EGL and Vulkan platform support])
 ],
   [x11="no"])
 AM_CONDITIONAL( [WANT_X11], [test x"$x11" = x"yes"])
@@ -172,6 +174,13 @@ AC_ARG_WITH(default-egl-platform,
   [ DEFAULT_EGL_PLATFORM="$withval" ],
   [ ])
 AC_SUBST(DEFAULT_EGL_PLATFORM)
+
+DEFAULT_VULKAN_PLATFORM="wayland"
+AC_ARG_WITH(default-vulkan-platform,
+  [  --with-default-vulkan-platform=NAME   Use NAME as default Vulkan platform if not specified by environment ],
+  [ DEFAULT_VULKAN_PLATFORM="$withval" ],
+  [ ])
+AC_SUBST(DEFAULT_VULKAN_PLATFORM)
 
 AC_ARG_WITH(android-headers,
   [  --with-android-headers=DIR     Use android headers available in DIR. See utils/extract-headers.sh ],
@@ -372,7 +381,8 @@ AM_COND_IF([HAS_VULKAN_HEADERS], [AC_CONFIG_FILES([
 	vulkan/platforms/Makefile
 	vulkan/platforms/common/Makefile
 	vulkan/platforms/null/Makefile
-	vulkan/platforms/wayland/Makefile])])
+	vulkan/platforms/wayland/Makefile
+	vulkan/platforms/x11/Makefile])])
 
 AC_OUTPUT
 

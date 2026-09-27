@@ -18,10 +18,17 @@
 #ifndef __LIBHYBRIS_VULKAN_WS_H
 #define __LIBHYBRIS_VULKAN_WS_H
 
+#include "config.h"
+
 #define VK_USE_PLATFORM_ANDROID_KHR 1
 #define VK_USE_PLATFORM_WAYLAND_KHR 1
+#if defined(WANT_X11)
+#define VK_USE_PLATFORM_XLIB_KHR 1
+#define VK_USE_PLATFORM_XCB_KHR 1
+#include <X11/Xlib.h>
+#include <xcb/xcb.h>
+#endif
 
-#include "config.h"
 #include <vulkan/vulkan.h>
 
 struct ws_vulkan_interface {
@@ -39,10 +46,16 @@ struct ws_module {
 #ifdef WANT_WAYLAND
     VkResult (*vkCreateWaylandSurfaceKHR)(VkInstance instance, const VkWaylandSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface);
     VkBool32 (*vkGetPhysicalDeviceWaylandPresentationSupportKHR)(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, struct wl_display* display);
+#endif
+#ifdef WANT_X11
+    VkResult (*vkCreateXcbSurfaceKHR)(VkInstance instance, const VkXcbSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface);
+    VkResult (*vkCreateXlibSurfaceKHR)(VkInstance instance, const VkXlibSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface);
+    VkBool32 (*vkGetPhysicalDeviceXcbPresentationSupportKHR)(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, xcb_connection_t* connection, uint32_t visual_id);
+    VkBool32 (*vkGetPhysicalDeviceXlibPresentationSupportKHR)(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, Display* dpy, VisualID visualID);
+#endif
     void (*vkDestroySurfaceKHR)(VkInstance instance, VkSurfaceKHR surface, const VkAllocationCallbacks* pAllocator);
     void (*patchSurfaceCapabilities)(VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR* pSurfaceCapabilities);
     void (*prepareSwapchain)(const VkSwapchainCreateInfoKHR* pCreateInfo);
-#endif
     void (*vkSetInstanceProcAddrFunc)(PFN_vkVoidFunction addr);
 };
 
@@ -51,9 +64,15 @@ VkResult ws_vkCreateInstance(const VkInstanceCreateInfo *pCreateInfo, const VkAl
 #ifdef WANT_WAYLAND
 VkResult ws_vkCreateWaylandSurfaceKHR(VkInstance instance, const VkWaylandSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface);
 VkBool32 ws_vkGetPhysicalDeviceWaylandPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, struct wl_display* display);
+#endif
+#ifdef WANT_X11
+VkResult ws_vkCreateXcbSurfaceKHR(VkInstance instance, const VkXcbSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface);
+VkResult ws_vkCreateXlibSurfaceKHR(VkInstance instance, const VkXlibSurfaceCreateInfoKHR* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface);
+VkBool32 ws_vkGetPhysicalDeviceXcbPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, xcb_connection_t* connection, uint32_t visual_id);
+VkBool32 ws_vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, Display* dpy, VisualID visualID);
+#endif
 void ws_vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface, const VkAllocationCallbacks* pAllocator);
 void ws_patchSurfaceCapabilities(VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR* pSurfaceCapabilities);
 void ws_prepareSwapchain(const VkSwapchainCreateInfoKHR* pCreateInfo);
-#endif
 void ws_vkSetInstanceProcAddrFunc(PFN_vkVoidFunction addr);
 #endif

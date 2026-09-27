@@ -63,11 +63,39 @@ static VkBool32 nullws_vkGetPhysicalDeviceWaylandPresentationSupportKHR(VkPhysic
 {
     return VK_FALSE;
 }
+#endif
+
+#ifdef WANT_X11
+static VkResult nullws_vkCreateXcbSurfaceKHR(VkInstance instance,
+        const VkXcbSurfaceCreateInfoKHR* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSurfaceKHR* pSurface)
+{
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+
+static VkResult nullws_vkCreateXlibSurfaceKHR(VkInstance instance,
+        const VkXlibSurfaceCreateInfoKHR* pCreateInfo,
+        const VkAllocationCallbacks* pAllocator,
+        VkSurfaceKHR* pSurface)
+{
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+
+static VkBool32 nullws_vkGetPhysicalDeviceXcbPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, xcb_connection_t *connection, uint32_t visual_id)
+{
+    return VK_FALSE;
+}
+
+static VkBool32 nullws_vkGetPhysicalDeviceXlibPresentationSupportKHR(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, Display *dpy, VisualID visualID)
+{
+    return VK_FALSE;
+}
+#endif
 
 static void nullws_vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface, const VkAllocationCallbacks* pAllocator)
 {
 }
-#endif
 
 static void nullws_vkSetInstanceProcAddrFunc(PFN_vkVoidFunction addr)
 {
@@ -82,9 +110,15 @@ struct ws_module ws_module_info = {
 #ifdef WANT_WAYLAND
     nullws_vkCreateWaylandSurfaceKHR,
     nullws_vkGetPhysicalDeviceWaylandPresentationSupportKHR,
+#endif
+#ifdef WANT_X11
+    nullws_vkCreateXcbSurfaceKHR,
+    nullws_vkCreateXlibSurfaceKHR,
+    nullws_vkGetPhysicalDeviceXcbPresentationSupportKHR,
+    nullws_vkGetPhysicalDeviceXlibPresentationSupportKHR,
+#endif
     nullws_vkDestroySurfaceKHR,
     NULL,
     NULL,
-#endif
     nullws_vkSetInstanceProcAddrFunc,
 };
