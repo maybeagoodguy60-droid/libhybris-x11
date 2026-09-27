@@ -1,18 +1,8 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * libhybris EGL-on-X11 platform plugin.
- *
- * Implements ws_module so chroot-side glibc clients can call
- *   eglGetPlatformDisplay(EGL_PLATFORM_X11_KHR, dpy, NULL)
- * and get a working EGL display backed by the Android vendor GLES via
- * libhybris. eglSwapBuffers ships AHardwareBuffers from the client to
- * the X server (Xwayland with the tawc patches) over the existing X11
- * connection via the TAWC-DRI extension; the server then forwards
- * them to the tawc compositor through android_wlegl. End-to-end zero
- * CPU-readback for pure GL-X11 clients.
- *
- * See notes/xwayland.md (Phase 2 step 4).
+ * libhybris EGL-on-X11 platform plugin for X servers with DRI3 and
+ * Present support.
  */
 
 #include <android-config.h>
@@ -35,13 +25,12 @@ extern "C" {
 #include <X11/Xlib-xcb.h>
 #include <xcb/xcb.h>
 #include <xcb/xcbext.h>
+#include <xcb/dri3.h>
+#include <xcb/present.h>
 }
-
-#include <sys/uio.h>
 
 #include <hybris/gralloc/gralloc.h>
 #include "x11_window.h"
-#include "tawc_dri_protocol.h"
 #include "logging.h"
 
 struct X11Display {
@@ -50,12 +39,8 @@ struct X11Display {
     bool owns_xdpy;
     xcb_connection_t *conn;
     int init_count;
-    uint8_t tawc_dri_opcode;
-    bool tawc_dri_present;
-    /* Server speaks TAWC-DRI >= 0.3: PresentBuffer carries a serial and
-     * SelectInput/XGE events exist. Gates both the wire shape and the
-     * event-driven buffer lifecycle in X11NativeWindow. */
-    bool tawc_dri_v03;
+    bool dri3_present;
+    bool present_events;
     /* Cached at GetDisplay so eglGetConfigAttrib(EGL_NATIVE_VISUAL_ID)
      * can return immediately. The screen's default visual is a 32-bit
      * TrueColor on every modern X server (Xwayland included), which
@@ -76,9 +61,8 @@ extern "C" _EGLDisplay *x11ws_GetDisplay(EGLNativeDisplayType display)
     xdisp->owns_xdpy = false;
     xdisp->conn = NULL;
     xdisp->init_count = 0;
-    xdisp->tawc_dri_opcode = 0;
-    xdisp->tawc_dri_present = false;
-    xdisp->tawc_dri_v03 = false;
+    xdisp->dri3_present = false;
+    xdisp->present_events = false;
 
     if (!xdisp->xdpy) {
         xdisp->xdpy = XOpenDisplay(NULL);
@@ -131,60 +115,38 @@ extern "C" void x11ws_eglInitialized(_EGLDisplay *dpy)
     if (xdisp->init_count++ > 0)
         return;
 
-    /* Probe TAWC-DRI: QueryExtension to get the major opcode, then
-     * QueryVersion to confirm the server speaks our wire shape. */
-    xcb_query_extension_cookie_t qe_c =
-        xcb_query_extension(xdisp->conn,
-                            (uint16_t)strlen(TAWC_DRI_NAME),
-                            TAWC_DRI_NAME);
-    xcb_query_extension_reply_t *qe =
-        xcb_query_extension_reply(xdisp->conn, qe_c, NULL);
-    if (!qe || !qe->present) {
-        HYBRIS_ERROR("x11-platform: TAWC-DRI extension not advertised by "
-                     "the X server. The libhybris X11 EGL platform requires "
-                     "a tawc-patched Xwayland (see notes/xwayland.md).");
-        free(qe);
+    const xcb_query_extension_reply_t *dri3 =
+        xcb_get_extension_data(xdisp->conn, &xcb_dri3_id);
+    const xcb_query_extension_reply_t *present =
+        xcb_get_extension_data(xdisp->conn, &xcb_present_id);
+    if (!dri3 || !dri3->present || !present || !present->present) {
+        HYBRIS_ERROR("x11-platform: DRI3 and Present are required");
         return;
     }
-    xdisp->tawc_dri_opcode = qe->major_opcode;
-    xdisp->tawc_dri_present = true;
-    free(qe);
 
-    /* QueryVersion: gates the v0.3 features (PresentBuffer serial,
-     * SelectInput + XGE events). Both ends ship in the same APK so an
-     * old server is belt-and-braces — and the compat is two-way: a
-     * v0.3 server also accepts the 36-byte v0.2 PresentBuffer, so a
-     * failed/false probe degrades to the old lifecycle instead of a
-     * broken wire format. */
-    tawc_dri_query_version_req vq = {};
-    vq.length = sizeof(vq) / 4;
-    vq.major_version = TAWC_DRI_MAJOR;
-    vq.minor_version = TAWC_DRI_MINOR;
-    struct iovec iov[3];
-    iov[2].iov_base = &vq;
-    iov[2].iov_len  = sizeof(vq);
-    xcb_protocol_request_t vq_req = {};
-    vq_req.count  = 1;
-    vq_req.ext    = &tawc_dri_ext;
-    vq_req.opcode = X_TAWCDRI_QueryVersion;
-    vq_req.isvoid = 0;
-    unsigned int seq =
-        xcb_send_request(xdisp->conn, XCB_REQUEST_CHECKED, &iov[2], &vq_req);
-    xcb_generic_error_t *err = NULL;
-    tawc_dri_query_version_reply *vr = (tawc_dri_query_version_reply *)
-        xcb_wait_for_reply(xdisp->conn, seq, &err);
-    if (vr) {
-        xdisp->tawc_dri_v03 =
-            vr->major_version == TAWC_DRI_MAJOR && vr->minor_version >= 3;
-        if (!xdisp->tawc_dri_v03)
-            HYBRIS_WARN("x11-platform: TAWC-DRI %u.%u server (< 0.3): no "
-                        "resize events, falling back to round-robin buffers",
-                        vr->major_version, vr->minor_version);
-        free(vr);
-    } else {
-        HYBRIS_ERROR("x11-platform: TAWC-DRI QueryVersion failed");
-        free(err);
+    xcb_dri3_query_version_reply_t *dri3_reply = xcb_dri3_query_version_reply(
+        xdisp->conn,
+        xcb_dri3_query_version(xdisp->conn, 1, 0),
+        nullptr);
+    if (!dri3_reply) {
+        HYBRIS_ERROR("x11-platform: DRI3 QueryVersion failed");
+        return;
     }
+    free(dri3_reply);
+
+    xcb_present_query_version_reply_t *present_reply =
+        xcb_present_query_version_reply(
+            xdisp->conn,
+            xcb_present_query_version(xdisp->conn, 1, 0),
+            nullptr);
+    if (!present_reply) {
+        HYBRIS_ERROR("x11-platform: Present QueryVersion failed");
+        return;
+    }
+    free(present_reply);
+
+    xdisp->dri3_present = true;
+    xdisp->present_events = true;
 }
 
 extern "C" void x11ws_Terminate(_EGLDisplay *dpy)
@@ -198,9 +160,8 @@ extern "C" EGLNativeWindowType x11ws_CreateWindow(EGLNativeWindowType win,
                                                   _EGLDisplay *display)
 {
     X11Display *xdisp = (X11Display *)display;
-    if (!xdisp->tawc_dri_present) {
-        HYBRIS_ERROR("x11-platform: cannot create window — TAWC-DRI not "
-                     "available on this X server.");
+    if (!xdisp || !xdisp->dri3_present) {
+        HYBRIS_ERROR("x11-platform: DRI3 and Present are not available");
         return NULL;
     }
 
@@ -220,8 +181,8 @@ extern "C" EGLNativeWindowType x11ws_CreateWindow(EGLNativeWindowType win,
     free(gg);
 
     X11NativeWindow *window =
-        new X11NativeWindow(xdisp->conn, xwin, xdisp->tawc_dri_opcode, w, h,
-                            xdisp->tawc_dri_v03);
+        new X11NativeWindow(xdisp->conn, xwin, w, h,
+                            xdisp->present_events);
     window->common.incRef(&window->common);
     return (EGLNativeWindowType)static_cast<ANativeWindow *>(window);
 }

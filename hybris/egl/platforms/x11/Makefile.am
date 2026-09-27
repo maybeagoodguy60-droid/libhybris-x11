@@ -1,9 +1,10 @@
 pkglib_LTLIBRARIES = eglplatform_x11.la
 
-eglplatform_x11_la_SOURCES = eglplatform_x11.cpp x11_window.cpp
+eglplatform_x11_la_SOURCES = eglplatform_x11.cpp $(top_srcdir)/platforms/x11/x11_window.cpp
 eglplatform_x11_la_CXXFLAGS = \
 	-I$(top_srcdir)/common \
 	-I$(top_srcdir)/platforms/common \
+	-I$(top_srcdir)/platforms/x11 \
 	-I$(top_srcdir)/include \
 	-I$(top_srcdir)/egl \
 	-I$(top_srcdir)/egl/platforms/common \
@@ -11,7 +12,9 @@ eglplatform_x11_la_CXXFLAGS = \
 	$(ANDROID_HEADERS_CFLAGS) \
 	$(X11_CFLAGS) \
 	$(XCB_CFLAGS) \
-	$(X11_XCB_CFLAGS)
+	$(X11_XCB_CFLAGS) \
+	$(DRI3_CFLAGS) \
+	$(PRESENT_CFLAGS)
 
 if WANT_DEBUG
 eglplatform_x11_la_CXXFLAGS += -ggdb -O0
@@ -28,7 +31,9 @@ eglplatform_x11_la_LDFLAGS = \
 	$(top_builddir)/gralloc/libgralloc.la \
 	$(X11_LIBS) \
 	$(XCB_LIBS) \
-	$(X11_XCB_LIBS)
+	$(X11_XCB_LIBS) \
+	$(DRI3_LIBS) \
+	$(PRESENT_LIBS)
 
 if HAS_ANDROID_4_2_0
 eglplatform_x11_la_LDFLAGS += $(top_builddir)/libsync/libsync.la
