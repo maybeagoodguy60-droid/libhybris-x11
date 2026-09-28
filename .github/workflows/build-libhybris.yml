@@ -105,6 +105,14 @@ jobs:
         working-directory: hybris
         run: |
           make DESTDIR="$GITHUB_WORKSPACE/hybris/build/stage" install
+          # The GLX->GLES shim is compiled on-device rather than here: it
+          # includes the EGL/GLES3 headers, and those are only present in the
+          # runtime chroot, not in this cross-build environment. Ship the
+          # source and its Makefile so the packaging step can build it.
+          mkdir -p build/stage/usr/lib/hybris/glxshim
+          cp "$GITHUB_WORKSPACE"/glxshim/glxshim.c \
+             "$GITHUB_WORKSPACE"/glxshim/Makefile \
+             build/stage/usr/lib/hybris/glxshim/
           cd build/stage/usr/lib/hybris
           tar --format=ustar \
             --exclude='*.la' --exclude='pkgconfig' --exclude='include' --exclude='bin' \
@@ -123,7 +131,8 @@ jobs:
             libEGL.so.1 libGLESv1_CM.so.1 libGLESv2.so.2 libvulkan.so.1 \
             libhybris-common.so.1 libhybris/linker/q.so \
             libhybris/eglplatform_x11.so libhybris/eglplatform_wayland.so \
-            libhybris/vulkanplatform_x11.so libhybris/vulkanplatform_wayland.so
+            libhybris/vulkanplatform_x11.so libhybris/vulkanplatform_wayland.so \
+            glxshim/glxshim.c glxshim/Makefile
           do
             test -e "$T/$f" || { echo "MISSING: $f"; exit 1; }
             echo "  ok  $f"
