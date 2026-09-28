@@ -250,10 +250,16 @@ static int          swap_interval = 1;
  * search path at process start, so changing it here cannot redirect dlopen. */
 static void load_gles(void);
 
+/* A GLX client is asking for an X11 drawable, and the shim only ever builds
+ * windows out of X11 window ids, so the X11 platform is the only one that can
+ * serve it. An ambient HYBRIS_EGLPLATFORM=wayland -- which the Termux session
+ * exports for its own EGL clients -- would otherwise send libhybris into the
+ * Wayland platform, where it aborts with "failed to connect to the server".
+ * GLXSHIM_EGLPLATFORM overrides this for debugging. */
 static void ensure_env(void)
 {
-    if (getenv("HYBRIS_EGLPLATFORM") == NULL)
-        setenv("HYBRIS_EGLPLATFORM", "x11", 1);
+    const char *p = getenv("GLXSHIM_EGLPLATFORM");
+    setenv("HYBRIS_EGLPLATFORM", (p && *p) ? p : "x11", 1);
     if (getenv("HYBRIS_LD_LIBRARY_PATH") == NULL)
         setenv("HYBRIS_LD_LIBRARY_PATH",
                "/vendor/lib64/egl:/vendor/lib64/hw:/vendor/lib64:"
