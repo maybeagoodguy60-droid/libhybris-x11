@@ -74,13 +74,13 @@ typedef void (*__GLXextFuncPtr)(void);
 #define GLX_X_RENDERABLE                 0x8012
 #define GLX_FBCONFIG_ID                  0x8013
 #define GLX_RGBA_TYPE                    0x8014
-#define GLX_WINDOW_TYPE                  0x8015
-#define GLX_PBUFFER_TYPE                 0x8016
-#define GLX_MAX_PBUFFER_WIDTH            0x8017
-#define GLX_MAX_PBUFFER_HEIGHT           0x8018
-#define GLX_MAX_PBUFFER_PIXELS           0x8019
-#define GLX_OPTIMAL_PBUFFER_WIDTH        0x801A
-#define GLX_OPTIMAL_PBUFFER_HEIGHT       0x801B
+#define GLX_WINDOW_TYPE                  0x8041
+#define GLX_PBUFFER_TYPE                 0x8043
+#define GLX_MAX_PBUFFER_WIDTH            0x8016
+#define GLX_MAX_PBUFFER_HEIGHT           0x8017
+#define GLX_MAX_PBUFFER_PIXELS           0x8018
+#define GLX_OPTIMAL_PBUFFER_WIDTH        0x8019
+#define GLX_OPTIMAL_PBUFFER_HEIGHT       0x801A
 #define GLX_X_VISUAL_ID                  0x21
 #define GLX_VISUAL_ID                    0x800B
 #define GLX_SWAP_INTERVAL_EXT            0x20F1
@@ -95,7 +95,7 @@ typedef void (*__GLXextFuncPtr)(void);
 #define GLX_DONT_CARE                    0x8000
 #define GLX_SWAP_COPY                    0x00000000
 #define GLX_SAMPLES                      0x186A1
-#define GLX_SAMPLE_BUFFERS               0x186A2
+#define GLX_SAMPLE_BUFFERS               0x186A0
 #define GLX_FRAMEBUFFER_SRGB_CAPABLE_ARB 0x20B2
 #define GLX_CONTEXT_PROFILE_MASK         0x9126
 #define GLX_CONTEXT_CORE_PROFILE_BIT     0x00000001
@@ -330,13 +330,15 @@ static void shim_init(void)
                        (void*)p_eglCreateWindowSurface);
 
     for (int i = 0; i < MAXCFGS; i++) {
+        static const int depth_tab[MAXCFGS]   = { 24, 24, 16, 0 };
+        static const int stencil_tab[MAXCFGS] = {  8,  0,  0, 0 };
         cfgs[i].used = 1;
         cfgs[i].id = i + 1;
         cfgs[i].visual_id = x_visual ? (int)XVisualIDFromVisual(x_visual->visual) : 0;
         cfgs[i].doublebuffer = 1;
         cfgs[i].rgba_sizes[0] = cfgs[i].rgba_sizes[1] = cfgs[i].rgba_sizes[2] = 8;
         cfgs[i].rgba_sizes[3] = 8;
-        cfgs[i].depth = 24; cfgs[i].stencil = 8;
+        cfgs[i].depth = depth_tab[i]; cfgs[i].stencil = stencil_tab[i];
         cfgs[i].samples = 0; cfgs[i].sample_buffers = 0;
         cfg_handles[i] = (GLXFBConfig)&cfgs[i];
     }
@@ -362,6 +364,8 @@ static int cfg_int(ShimFBConfig *c, int attr)
     case GLX_SAMPLES:              return c->samples;
     case GLX_SAMPLE_BUFFERS:       return c->sample_buffers;
     case GLX_X_RENDERABLE:         return True;
+    case GLX_USE_GL:               return True;
+    case GLX_RGBA:                 return True;
     case GLX_RENDER_TYPE:          return GLX_RGBA_BIT;
     case GLX_DRAWABLE_TYPE:        return GLX_WINDOW_BIT | GLX_PBUFFER_BIT;
     case GLX_X_VISUAL_TYPE:        return GLX_TRUE_COLOR;
@@ -384,9 +388,8 @@ static int cfg_int(ShimFBConfig *c, int attr)
     }
 }
 
-static int match_cfg(const int *attrs)
+static int match_one(const ShimFBConfig *c, const int *attrs)
 {
-    ShimFBConfig *c = &cfgs[0];
     for (const int *a = attrs; a && a[0] != None; a += 2) {
         if (a[0] == GLX_RENDER_TYPE && a[1] != GLX_RGBA_BIT) return 0;
         if (a[0] == GLX_DRAWABLE_TYPE && !(a[1] & GLX_WINDOW_BIT)) return 0;
@@ -398,8 +401,20 @@ static int match_cfg(const int *attrs)
         if (a[0] == GLX_ALPHA_SIZE && a[1] > 0 && c->rgba_sizes[3] < a[1]) return 0;
         if (a[0] == GLX_DEPTH_SIZE   && c->depth < a[1]) return 0;
         if (a[0] == GLX_STENCIL_SIZE && c->stencil < a[1]) return 0;
+        if (a[0] == GLX_SAMPLES && a[1] > 0 && c->samples < a[1]) return 0;
+        if (a[0] == GLX_SAMPLE_BUFFERS && a[1] > 0 && c->sample_buffers < a[1]) return 0;
     }
     return 1;
+}
+
+static int match_cfg(const int *attrs, GLXFBConfig *out, int max)
+{
+    int n = 0;
+    for (int i = 0; i < MAXCFGS && n < max; i++) {
+        if (!cfgs[i].used) continue;
+        if (match_one(&cfgs[i], attrs)) out[n++] = cfg_handles[i];
+    }
+    return n;
 }
 
 /* ------------------------------------------------------------------ */
@@ -614,14 +629,16 @@ GLXFBConfig *glXChooseFBConfig(Display *d, int screen, const int *attrs, int *n)
     (void)screen;
     shim_init();
     if (dbg()) { fprintf(stderr, "[shim] glXChooseFBConfig(dpy=%p", (void*)d); for (const int*a=attrs;a&&a[0]!=None;a+=2) fprintf(stderr, " 0x%x=%d", a[0], a[1]); fprintf(stderr, ")\n"); }
-    if (!match_cfg(attrs)) { if (dbg()) fprintf(stderr, "[shim]  -> NO MATCH\n"); if (n) *n = 0; return NULL; }
-    if (dbg()) fprintf(stderr, "[shim]  -> matched, n=1\n");
+    GLXFBConfig tmp[MAXCFGS];
+    int got = match_cfg(attrs, tmp, MAXCFGS);
+    if (got < 1) { if (dbg()) fprintf(stderr, "[shim]  -> NO MATCH\n"); if (n) *n = 0; return NULL; }
+    if (dbg()) fprintf(stderr, "[shim]  -> matched, n=%d\n", got);
     /* The array must be freeable: callers copy it and then XFree() it, which
      * is plain free(). Returning static storage corrupts the heap. */
-    GLXFBConfig *arr = (GLXFBConfig *)malloc(sizeof(GLXFBConfig));
+    GLXFBConfig *arr = (GLXFBConfig *)malloc(sizeof(GLXFBConfig) * (size_t)got);
     if (!arr) { if (n) *n = 0; return NULL; }
-    arr[0] = cfg_handles[0];
-    if (n) *n = 1;
+    for (int i = 0; i < got; i++) arr[i] = tmp[i];
+    if (n) *n = got;
     return arr;
 }
 
