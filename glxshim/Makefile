@@ -15,7 +15,7 @@ SYS_LIB_DIR ?= $(PREFIX)/lib/aarch64-linux-gnu
 CC     ?= gcc
 CFLAGS ?= -O2 -fPIC -Wall
 LDFLAGS ?= -shared
-LDLIBS ?= -ldl -lX11
+LDLIBS ?= -ldl -lX11 -lm
 
 STAMP  := $(shell date +%Y%m%d-%H%M%S)
 BACKUP ?= backup-$(STAMP)

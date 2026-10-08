@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 #include <dlfcn.h>
 #include <link.h>
 
@@ -724,9 +725,10 @@ void glXDestroyPbuffer(Display *d, GLXPbuffer p) { (void)d; (void)p; }
 int  glXQueryContext(Display *d, GLXContext c, int attr, int *val) { (void)d; (void)c; (void)attr; if (val) *val = 0; return 0; }
 int  glXQueryDrawable_legacy(Display *d, GLXDrawable dr, int a, unsigned int *v) { return glXQueryDrawable(d, dr, a, v); }
 
-/* ------------------------------------------------------------------ */
-/* GL entry points: forward to GLES                                   */
-/* ------------------------------------------------------------------ */
+/* ---- GL entry points: forward to GLES ---- */
+
+static int  ff_tex_on;
+static int  ff_only(GLenum c);
 
 static void load_gles(void)
 {
@@ -743,8 +745,18 @@ void glClearColor(GLfloat r,GLfloat g,GLfloat b,GLfloat a){ load_gles(); if(pfCl
 void glClearDepth(GLdouble d){ load_gles(); if(pfClearDepth) pfClearDepth((GLfloat)d); }
 void glViewport(GLint x,GLint y,GLsizei w,GLsizei h){ load_gles(); if(pfViewport) pfViewport(x,y,w,h); }
 void glScissor(GLint x,GLint y,GLsizei w,GLsizei h){ load_gles(); if(pfScissor) pfScissor(x,y,w,h); }
-void glEnable(GLenum c)                { load_gles(); if(pfEnable) pfEnable(c); }
-void glDisable(GLenum c)               { load_gles(); if(pfDisable) pfDisable(c); }
+void glEnable(GLenum c)
+{
+    if (c == GL_TEXTURE_2D) ff_tex_on = 1;
+    if (ff_only(c)) return;
+    load_gles(); if(pfEnable) pfEnable(c);
+}
+void glDisable(GLenum c)
+{
+    if (c == GL_TEXTURE_2D) ff_tex_on = 0;
+    if (ff_only(c)) return;
+    load_gles(); if(pfDisable) pfDisable(c);
+}
 void glBlendFunc(GLenum s,GLenum d)    { load_gles(); if(pfBlendFunc) pfBlendFunc(s,d); }
 void glDepthFunc(GLenum f)             { load_gles(); if(pfDepthFunc) pfDepthFunc(f); }
 void glDepthMask(GLboolean m)          { load_gles(); if(pfDepthMask) pfDepthMask(m); }
@@ -814,7 +826,7 @@ const GLubyte *glGetString(GLenum name)
 {
     if (dbg()) fprintf(stderr, "[shim] glGetString(0x%x)\n", name);
     switch (name) {
-    case GL_VERSION:    return (const GLubyte *)"3.0 (Core Profile) Mesa 26.2.2 glxshim";
+    case GL_VERSION:    return (const GLubyte *)"3.0 (Core Profile) glxshim 1.0 (GLES3 backend)";
     case GL_RENDERER:   return (const GLubyte *)"Mali-G57 MC2 (glxshim, GLES3 backend)";
     case GL_VENDOR:     return (const GLubyte *)"Termux X11 glxshim";
     case GL_SHADING_LANGUAGE_VERSION: return (const GLubyte *)"300 es";
@@ -858,47 +870,529 @@ void glMateriali(GLenum face, GLenum pname, GLint param) { (void)face; (void)pna
 void glColorMaterial(GLenum face, GLenum mode) { (void)face; (void)mode; }
 void glShadeModel(GLenum mode) { (void)mode; }
 void glAlphaFunc(GLenum func, GLfloat ref) { (void)func; (void)ref; }
-void glBegin(GLenum mode) { (void)mode; }
-void glEnd(void) {  }
-void glVertex2f(GLfloat x, GLfloat y) { (void)x; (void)y; }
-void glVertex2fv(const GLfloat *v) { (void)v; }
-void glVertex3f(GLfloat x, GLfloat y, GLfloat z) { (void)x; (void)y; (void)z; }
-void glVertex3fv(const GLfloat *v) { (void)v; }
-void glVertex4f(GLfloat x, GLfloat y, GLfloat z, GLfloat w) { (void)x; (void)y; (void)z; (void)w; }
-void glVertex4fv(const GLfloat *v) { (void)v; }
-void glNormal3f(GLfloat x, GLfloat y, GLfloat z) { (void)x; (void)y; (void)z; }
-void glNormal3fv(const GLfloat *v) { (void)v; }
-void glColor3f(GLfloat r, GLfloat g, GLfloat b) { (void)r; (void)g; (void)b; }
-void glColor3fv(const GLfloat *v) { (void)v; }
-void glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { (void)r; (void)g; (void)b; (void)a; }
-void glColor4fv(const GLfloat *v) { (void)v; }
-void glColor3ub(GLubyte r, GLubyte g, GLubyte b) { (void)r; (void)g; (void)b; }
-void glColor4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a) { (void)r; (void)g; (void)b; (void)a; }
-void glColor3d(GLdouble r, GLdouble g, GLdouble b) { (void)r; (void)g; (void)b; }
-void glColor4d(GLdouble r, GLdouble g, GLdouble b, GLdouble a) { (void)r; (void)g; (void)b; (void)a; }
-void glTexCoord2f(GLfloat s, GLfloat t) { (void)s; (void)t; }
-void glTexCoord2fv(const GLfloat *v) { (void)v; }
-void glTexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q) { (void)s; (void)t; (void)r; (void)q; }
-void glMatrixMode(GLenum mode) { (void)mode; }
-void glLoadIdentity(void) {  }
-void glLoadMatrixf(const GLfloat *m) { (void)m; }
-void glLoadMatrixd(const GLdouble *m) { (void)m; }
-void glMultMatrixf(const GLfloat *m) { (void)m; }
-void glMultMatrixd(const GLdouble *m) { (void)m; }
-void glPushMatrix(void) {  }
-void glPopMatrix(void) {  }
-void glTranslatef(GLfloat x, GLfloat y, GLfloat z) { (void)x; (void)y; (void)z; }
-void glTranslated(GLdouble x, GLdouble y, GLdouble z) { (void)x; (void)y; (void)z; }
-void glTranslatefv(const GLfloat *v) { (void)v; }
-void glRotatef(GLfloat a, GLfloat x, GLfloat y, GLfloat z) { (void)a; (void)x; (void)y; (void)z; }
-void glRotated(GLdouble a, GLdouble x, GLdouble y, GLdouble z) { (void)a; (void)x; (void)y; (void)z; }
-void glScalef(GLfloat x, GLfloat y, GLfloat z) { (void)x; (void)y; (void)z; }
-void glScaled(GLdouble x, GLdouble y, GLdouble z) { (void)x; (void)y; (void)z; }
-void glOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t, GLdouble n, GLdouble f) { (void)l; (void)r; (void)b; (void)t; (void)n; (void)f; }
-void glFrustum(GLdouble l, GLdouble r, GLdouble b, GLdouble t, GLdouble n, GLdouble f) { (void)l; (void)r; (void)b; (void)t; (void)n; (void)f; }
+#ifndef GL_POINTS
+#define GL_POINTS 0x0000
+#endif
+#ifndef GL_LINES
+#define GL_LINES 0x0001
+#endif
+#ifndef GL_LINE_LOOP
+#define GL_LINE_LOOP 0x0002
+#endif
+#ifndef GL_LINE_STRIP
+#define GL_LINE_STRIP 0x0003
+#endif
+#ifndef GL_TRIANGLES
+#define GL_TRIANGLES 0x0004
+#endif
+#ifndef GL_TRIANGLE_STRIP
+#define GL_TRIANGLE_STRIP 0x0005
+#endif
+#ifndef GL_TRIANGLE_FAN
+#define GL_TRIANGLE_FAN 0x0006
+#endif
+#ifndef GL_QUADS
+#define GL_QUADS 0x0007
+#endif
+#ifndef GL_QUAD_STRIP
+#define GL_QUAD_STRIP 0x0008
+#endif
+#ifndef GL_POLYGON
+#define GL_POLYGON 0x0009
+#endif
+#ifndef GL_MODELVIEW
+#define GL_MODELVIEW 0x1700
+#endif
+#ifndef GL_PROJECTION
+#define GL_PROJECTION 0x1701
+#endif
+#ifndef GL_TEXTURE
+#define GL_TEXTURE 0x1702
+#endif
+#ifndef GL_LIGHTING
+#define GL_LIGHTING 0x0B50
+#endif
+#ifndef GL_LIGHT_MODEL_TWO_SIDE
+#define GL_LIGHT_MODEL_TWO_SIDE 0x0B52
+#endif
+#ifndef GL_SHADE_MODEL
+#define GL_SHADE_MODEL 0x0B54
+#endif
+#ifndef GL_COLOR_MATERIAL
+#define GL_COLOR_MATERIAL 0x0B57
+#endif
+#ifndef GL_FOG
+#define GL_FOG 0x0B60
+#endif
+#ifndef GL_NORMALIZE
+#define GL_NORMALIZE 0x0BA1
+#endif
+#ifndef GL_COLOR_INDEX
+#define GL_COLOR_INDEX 0x1900
+#endif
+#ifndef GL_MAX_LIGHTS
+#define GL_MAX_LIGHTS 0x0D31
+#endif
+#ifndef GL_AUTO_NORMALIZE
+#define GL_AUTO_NORMALIZE 0x0D80
+#endif
+#ifndef GL_TEXTURE_1D
+#define GL_TEXTURE_1D 0x0DE0
+#endif
+#ifndef GL_CLIP_PLANE0
+#define GL_CLIP_PLANE0 0x3000
+#endif
+#ifndef GL_LIGHT0
+#define GL_LIGHT0 0x4000
+#endif
+#ifndef GL_POINT_SMOOTH
+#define GL_POINT_SMOOTH 0x0B10
+#endif
+#ifndef GL_LINE_SMOOTH
+#define GL_LINE_SMOOTH 0x0B20
+#endif
+#ifndef GL_FRONT
+#define GL_FRONT 0x0404
+#endif
+#ifndef GL_BACK
+#define GL_BACK 0x0405
+#endif
+#ifndef GL_FRONT_AND_BACK
+#define GL_FRONT_AND_BACK 0x0408
+#endif
+#ifndef GL_AMBIENT
+#define GL_AMBIENT 0x1200
+#endif
+#ifndef GL_DIFFUSE
+#define GL_DIFFUSE 0x1201
+#endif
+#ifndef GL_SPECULAR
+#define GL_SPECULAR 0x1202
+#endif
+#ifndef GL_POSITION
+#define GL_POSITION 0x1203
+#endif
+#ifndef GL_EMISSION
+#define GL_EMISSION 0x1600
+#endif
+#ifndef GL_FLAT
+#define GL_FLAT 0x1D00
+#endif
+#ifndef GL_SMOOTH
+#define GL_SMOOTH 0x1D01
+#endif
+#ifndef GL_MODULATE
+#define GL_MODULATE 0x2100
+#endif
+#ifndef GL_DECAL
+#define GL_DECAL 0x2101
+#endif
+#ifndef GL_REPLACE
+#define GL_REPLACE 0x1E01
+#endif
+#ifndef GL_TEXTURE_ENV
+#define GL_TEXTURE_ENV 0x2300
+#endif
+#ifndef GL_TEXTURE_ENV_MODE
+#define GL_TEXTURE_ENV_MODE 0x2200
+#endif
+#ifndef GL_MULTISAMPLE
+#define GL_MULTISAMPLE 0x809D
+#endif
+#ifndef GL_RESCALE_NORMAL
+#define GL_RESCALE_NORMAL 0x803A
+#endif
+#ifndef GL_POLYGON_OFFSET_FILL
+#define GL_POLYGON_OFFSET_FILL 0x8037
+#endif
+#ifndef GL_TEXTURE_3D
+#define GL_TEXTURE_3D 0x806F
+#endif
+
+/* Immediate-mode geometry is assembled here and handed to GLES as a real
+ * triangle list, with a two-attribute shader standing in for the fixed
+ * function transform-and-colour stage. */
+
+#define FF_STACK_MAX 32
+#define GL_PI_F 3.14159265358979323846f
+
+typedef struct { GLfloat p[3], c[4], t[2]; } FFVert;
+
+static GLfloat ff_mv[16], ff_proj[16];
+static GLfloat ff_stack[FF_STACK_MAX][16];
+static GLenum  ff_stack_mode[FF_STACK_MAX];
+static int     ff_sp;
+static GLenum  ff_mode = GL_MODELVIEW;
+static GLfloat ff_col[4] = { 1, 1, 1, 1 };
+static GLfloat ff_nrm[3] = { 0, 0, 1 };
+static GLfloat ff_tex[4] = { 0, 0, 0, 1 };
+static GLenum  ff_shade = GL_SMOOTH;
+static int     ff_in_begin;
+static GLenum  ff_prim;
+static FFVert *ff_v;
+static int     ff_n, ff_cap;
+
+static GLuint ff_prog, ff_vao, ff_vbo;
+static GLint  ff_aPos, ff_aCol, ff_aTex, ff_uMVP, ff_uUseTex;
+static int    ff_ready;
+
+static GLfloat *ff_cur(void) { return ff_mode == GL_PROJECTION ? ff_proj : ff_mv; }
+
+static void m_ident(GLfloat *m)
+{
+    memset(m, 0, 16 * sizeof *m);
+    m[0] = m[5] = m[10] = m[15] = 1.0f;
+}
+
+static void m_mul(GLfloat *r, const GLfloat *a, const GLfloat *b)
+{
+    GLfloat t[16];
+    for (int c = 0; c < 4; c++)
+        for (int i = 0; i < 4; i++) {
+            GLfloat s = 0;
+            for (int k = 0; k < 4; k++) s += a[k * 4 + i] * b[c * 4 + k];
+            t[c * 4 + i] = s;
+        }
+    memcpy(r, t, sizeof t);
+}
+
+static void m_translate(GLfloat *m, GLfloat x, GLfloat y, GLfloat z)
+{
+    GLfloat t[16];
+    m_ident(t);
+    t[12] = x; t[13] = y; t[14] = z;
+    m_mul(m, m, t);
+}
+
+static void m_scale(GLfloat *m, GLfloat x, GLfloat y, GLfloat z)
+{
+    GLfloat t[16];
+    m_ident(t);
+    t[0] = x; t[5] = y; t[10] = z;
+    m_mul(m, m, t);
+}
+
+static void m_rotate(GLfloat *m, GLfloat deg, GLfloat x, GLfloat y, GLfloat z)
+{
+    GLfloat t[16], c, s, n, xx, yy, zz, xy, xz, yz;
+    m_ident(t);
+    n = sqrtf(x * x + y * y + z * z);
+    if (n < 1e-6f) return;
+    x /= n; y /= n; z /= n;
+    c = cosf(deg * GL_PI_F / 180.0f);
+    s = sinf(deg * GL_PI_F / 180.0f);
+    xx = x * x; yy = y * y; zz = z * z;
+    xy = x * y * (1 - c); xz = x * z * (1 - c); yz = y * z * (1 - c);
+    t[0]  = xx + c;      t[1]  = xy + s * z;  t[2]  = xz - s * y;
+    t[4]  = xy - s * z;  t[5]  = yy + c;      t[6]  = yz + s * x;
+    t[8]  = xz + s * y;  t[9]  = yz - s * x;  t[10] = zz + c;
+    t[12] = 0; t[13] = 0; t[14] = 0;
+    m_mul(m, m, t);
+}
+
+static void m_ortho(GLfloat *m, GLfloat l, GLfloat r, GLfloat b, GLfloat t,
+                    GLfloat n, GLfloat f)
+{
+    GLfloat o[16];
+    m_ident(o);
+    o[0]  = 2.0f / (r - l);
+    o[5]  = 2.0f / (t - b);
+    o[10] = -2.0f / (f - n);
+    o[12] = -(r + l) / (r - l);
+    o[13] = -(t + b) / (t - b);
+    o[14] = -(f + n) / (f - n);
+    m_mul(m, m, o);
+}
+
+static void m_frustum(GLfloat *m, GLfloat l, GLfloat r, GLfloat b, GLfloat t,
+                      GLfloat n, GLfloat f)
+{
+    GLfloat o[16];
+    m_ident(o);
+    o[0]  = 2.0f * n / (r - l);
+    o[5]  = 2.0f * n / (t - b);
+    o[8]  = (r + l) / (r - l);
+    o[9]  = (t + b) / (t - b);
+    o[10] = -(f + n) / (f - n);
+    o[11] = -1.0f;
+    o[14] = -2.0f * f * n / (f - n);
+    m_mul(m, m, o);
+}
+
+static int ff_only(GLenum c)
+{
+    switch (c) {
+    case GL_LIGHTING: case GL_COLOR_MATERIAL: case GL_NORMALIZE:
+    case GL_RESCALE_NORMAL: case GL_AUTO_NORMALIZE: case GL_FOG:
+    case GL_TEXTURE: case GL_TEXTURE_1D: case GL_TEXTURE_3D:
+    case GL_MULTISAMPLE: case GL_LINE_SMOOTH: case GL_POINT_SMOOTH:
+    case GL_POLYGON_OFFSET_FILL: case GL_COLOR_INDEX:
+        return 1;
+    }
+    return c >= GL_LIGHT0 && c < GL_LIGHT0 + 8;
+}
+
+static void ff_init(void)
+{
+    if (ff_ready) return;
+    ff_ready = 1;
+    m_ident(ff_mv);
+    m_ident(ff_proj);
+    load_gles();
+    if (!pfCreateProgram) return;
+
+    static const char vs[] =
+        "#version 100\n"
+        "uniform mat4 uMVP;\n"
+        "attribute vec4 aPos;\n"
+        "attribute vec4 aCol;\n"
+        "attribute vec2 aTex;\n"
+        "varying vec4 vCol;\n"
+        "varying vec2 vTex;\n"
+        "void main(){ vCol=aCol; vTex=aTex; gl_Position=uMVP*aPos; }\n";
+    static const char fs[] =
+        "#version 100\n"
+        "precision mediump float;\n"
+        "uniform sampler2D uTex;\n"
+        "uniform int uUseTex;\n"
+        "varying vec4 vCol;\n"
+        "varying vec2 vTex;\n"
+        "void main(){ vec4 c=vCol; if(uUseTex==1) c*=texture2D(uTex,vTex); gl_FragColor=c; }\n";
+
+    GLuint v = pfCreateShader(GL_VERTEX_SHADER);
+    GLuint f = pfCreateShader(GL_FRAGMENT_SHADER);
+    if (!v || !f) return;
+    const GLchar *vsrc = vs, *fsrc = fs;
+    pfShaderSource(v, 1, &vsrc, NULL);
+    pfCompileShader(v);
+    pfShaderSource(f, 1, &fsrc, NULL);
+    pfCompileShader(f);
+    GLint ok = 0;
+    pfGetShaderiv(v, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        GLchar log[512]; GLsizei n = 0;
+        pfGetShaderInfoLog(v, sizeof log, &n, log);
+        if (n > 0) { log[n < (GLsizei)sizeof log ? n : (GLsizei)sizeof log - 1] = 0;
+                     fprintf(stderr, "glxshim: ff vertex shader: %s\n", log); }
+        return;
+    }
+    ff_prog = pfCreateProgram();
+    pfAttachShader(ff_prog, v);
+    pfAttachShader(ff_prog, f);
+    pfLinkProgram(ff_prog);
+    pfGetProgramiv(ff_prog, GL_LINK_STATUS, &ok);
+    if (!ok) { ff_prog = 0; return; }
+    pfDeleteShader(v);
+    pfDeleteShader(f);
+
+    ff_aPos   = pfGetAttribLocation(ff_prog, "aPos");
+    ff_aCol   = pfGetAttribLocation(ff_prog, "aCol");
+    ff_aTex   = pfGetAttribLocation(ff_prog, "aTex");
+    ff_uMVP   = pfGetUniformLocation(ff_prog, "uMVP");
+    ff_uUseTex = pfGetUniformLocation(ff_prog, "uUseTex");
+
+    if (pfGenVertexArrays) pfGenVertexArrays(1, &ff_vao);
+    if (pfGenBuffers) pfGenBuffers(1, &ff_vbo);
+    if (dbg()) fprintf(stderr, "[shim] ff program=%u vao=%u vbo=%u attrs=%d/%d/%d\n",
+                        ff_prog, ff_vao, ff_vbo, ff_aPos, ff_aCol, ff_aTex);
+}
+
+static void ff_push(GLfloat x, GLfloat y, GLfloat z)
+{
+    if (ff_n >= ff_cap) {
+        int cap = ff_cap ? ff_cap * 2 : 256;
+        FFVert *v = (FFVert *)realloc(ff_v, (size_t)cap * sizeof *v);
+        if (!v) return;
+        ff_v = v; ff_cap = cap;
+    }
+    FFVert *o = &ff_v[ff_n++];
+    o->p[0] = x; o->p[1] = y; o->p[2] = z;
+    memcpy(o->c, ff_col, sizeof o->c);
+    o->t[0] = ff_tex[0]; o->t[1] = ff_tex[1];
+}
+
+static void ff_draw_arrays(GLenum mode, const FFVert *v, int n, const GLfloat *fc)
+{
+    if (n < 1) return;
+    FFVert *o = (FFVert *)malloc((size_t)n * sizeof *o);
+    if (!o) return;
+    GLenum m = mode;
+    int flat = (ff_shade == GL_FLAT) && fc;
+
+    if (mode == GL_QUADS || mode == GL_QUAD_STRIP ||
+        mode == GL_POLYGON || mode == GL_TRIANGLES ||
+        mode == GL_TRIANGLE_STRIP || mode == GL_TRIANGLE_FAN) {
+        int k = 0;
+        #define EMIT(i, fc) do { \
+            o[k] = v[i]; \
+            if (flat) memcpy(o[k].c, (fc), sizeof o[k].c); \
+            k++; } while (0)
+        if (mode == GL_TRIANGLES) {
+            for (int i = 0; i + 2 < n; i += 3) {
+                const GLfloat *p = v[i].c;
+                EMIT(i, p); EMIT(i + 1, p); EMIT(i + 2, p);
+            }
+        } else if (mode == GL_TRIANGLE_STRIP || mode == GL_TRIANGLE_FAN) {
+            for (int i = 1; i + 1 < n; i++) {
+                const GLfloat *p = v[0].c;
+                EMIT(0, p); EMIT(i, p); EMIT(i + 1, p);
+            }
+        } else if (mode == GL_POLYGON) {
+            for (int i = 1; i + 1 < n; i++) {
+                const GLfloat *p = v[0].c;
+                EMIT(0, p); EMIT(i, p); EMIT(i + 1, p);
+            }
+        } else if (mode == GL_QUADS) {
+            for (int i = 0; i + 3 < n; i += 4) {
+                const GLfloat *p = v[i].c;
+                EMIT(i, p); EMIT(i + 1, p); EMIT(i + 2, p);
+                EMIT(i + 1, p); EMIT(i + 2, p); EMIT(i + 3, p);
+            }
+        } else {
+            for (int i = 0; i + 3 < n; i += 2) {
+                const GLfloat *p = v[i].c;
+                if (i + 4 < n) { EMIT(i + 1, p); EMIT(i + 2, p); EMIT(i + 3, p); }
+                if (i + 4 < n) { EMIT(i + 2, p); EMIT(i + 3, p); EMIT(i + 4, p); }
+            }
+        }
+        #undef EMIT
+        m = GL_TRIANGLES;
+        n = k;
+    }
+    if (n < 1) { free(o); return; }
+
+    if (dbg()) fprintf(stderr, "[shim] ff draw mode=0x%x n=%d flat=%d tex=%d\n", m, n, flat, ff_tex_on);
+    ff_init();
+    if (!ff_prog || !pfBufferData) { free(o); return; }
+
+    GLfloat mvp[16];
+    m_mul(mvp, ff_proj, ff_mv);
+    if (ff_vao) pfBindVertexArray(ff_vao);
+    pfUseProgram(ff_prog);
+    if (ff_uMVP >= 0) pfUniformMatrix4fv(ff_uMVP, 1, GL_FALSE, mvp);
+    if (ff_uUseTex >= 0) pfUniform1i(ff_uUseTex, ff_tex_on ? 1 : 0);
+    pfBindBuffer(GL_ARRAY_BUFFER, ff_vbo);
+    pfBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)n * sizeof *o), o, GL_STREAM_DRAW);
+    if (ff_aPos >= 0) {
+        pfEnableVertexAttribArray((GLuint)ff_aPos);
+        pfVertexAttribPointer((GLuint)ff_aPos, 3, GL_FLOAT, GL_FALSE, sizeof(FFVert), (const void *)0);
+    }
+    if (ff_aCol >= 0) {
+        pfEnableVertexAttribArray((GLuint)ff_aCol);
+        pfVertexAttribPointer((GLuint)ff_aCol, 4, GL_FLOAT, GL_FALSE, sizeof(FFVert),
+                              (const void *)(3 * sizeof(GLfloat)));
+    }
+    if (ff_aTex >= 0) {
+        pfEnableVertexAttribArray((GLuint)ff_aTex);
+        pfVertexAttribPointer((GLuint)ff_aTex, 2, GL_FLOAT, GL_FALSE, sizeof(FFVert),
+                              (const void *)(7 * sizeof(GLfloat)));
+    }
+    pfDrawArrays(m, 0, n);
+    if (ff_vao) pfBindVertexArray(0);
+    free(o);
+}
+
+static void ff_end(void)
+{
+    if (!ff_in_begin) return;
+    ff_in_begin = 0;
+    if (ff_n > 0) ff_draw_arrays(ff_prim, ff_v, ff_n, ff_v[0].c);
+    ff_n = 0;
+}
+
+void glBegin(GLenum mode) { ff_init(); ff_in_begin = 1; ff_prim = mode; ff_n = 0; }
+void glEnd(void)          { ff_end(); }
+void glVertex2f(GLfloat x, GLfloat y) { ff_push(x, y, 0); }
+void glVertex2fv(const GLfloat *v)    { if (v) ff_push(v[0], v[1], 0); }
+void glVertex2d(GLdouble x, GLdouble y) { ff_push((GLfloat)x, (GLfloat)y, 0); }
+void glVertex2i(GLint x, GLint y)      { ff_push((GLfloat)x, (GLfloat)y, 0); }
+void glVertex3f(GLfloat x, GLfloat y, GLfloat z) { ff_push(x, y, z); }
+void glVertex3fv(const GLfloat *v)    { if (v) ff_push(v[0], v[1], v[2]); }
+void glVertex3d(GLdouble x, GLdouble y, GLdouble z) { ff_push((GLfloat)x, (GLfloat)y, (GLfloat)z); }
+void glVertex3i(GLint x, GLint y, GLint z) { ff_push((GLfloat)x, (GLfloat)y, (GLfloat)z); }
+void glVertex4f(GLfloat x, GLfloat y, GLfloat z, GLfloat w) { (void)w; ff_push(x, y, z); }
+void glVertex4fv(const GLfloat *v)    { if (v) ff_push(v[0], v[1], v[2]); }
+void glVertex4d(GLdouble x, GLdouble y, GLdouble z, GLdouble w) { (void)w; ff_push((GLfloat)x, (GLfloat)y, (GLfloat)z); }
+void glNormal3f(GLfloat x, GLfloat y, GLfloat z) { ff_nrm[0]=x; ff_nrm[1]=y; ff_nrm[2]=z; }
+void glNormal3fv(const GLfloat *v)    { if (v) { ff_nrm[0]=v[0]; ff_nrm[1]=v[1]; ff_nrm[2]=v[2]; } }
+void glColor3f(GLfloat r, GLfloat g, GLfloat b) { ff_col[0]=r; ff_col[1]=g; ff_col[2]=b; ff_col[3]=1; }
+void glColor3fv(const GLfloat *v)      { if (v) { glColor3f(v[0], v[1], v[2]); } }
+void glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { ff_col[0]=r; ff_col[1]=g; ff_col[2]=b; ff_col[3]=a; }
+void glColor4fv(const GLfloat *v)      { if (v) { glColor4f(v[0], v[1], v[2], v[3]); } }
+void glColor3d(GLdouble r, GLdouble g, GLdouble b) { glColor3f((GLfloat)r,(GLfloat)g,(GLfloat)b); }
+void glColor4d(GLdouble r, GLdouble g, GLdouble b, GLdouble a) { glColor4f((GLfloat)r,(GLfloat)g,(GLfloat)b,(GLfloat)a); }
+void glColor3ub(GLubyte r, GLubyte g, GLubyte b) { glColor4f(r/255.0f,g/255.0f,b/255.0f,1.0f); }
+void glColor4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a) { glColor4f(r/255.0f,g/255.0f,b/255.0f,a/255.0f); }
+void glColor3ui(GLuint r, GLuint g, GLuint b) { glColor4f(r/255.0f,g/255.0f,b/255.0f,1.0f); }
+void glColor4ui(GLuint r, GLuint g, GLuint b, GLuint a) { glColor4f(r/255.0f,g/255.0f,b/255.0f,a/255.0f); }
+void glTexCoord1f(GLfloat s)           { ff_tex[0]=s; ff_tex[1]=0; }
+void glTexCoord2f(GLfloat s, GLfloat t) { ff_tex[0]=s; ff_tex[1]=t; }
+void glTexCoord2fv(const GLfloat *v)   { if (v) { ff_tex[0]=v[0]; ff_tex[1]=v[1]; } }
+void glTexCoord2d(GLdouble s, GLdouble t) { ff_tex[0]=(GLfloat)s; ff_tex[1]=(GLfloat)t; }
+void glTexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q) { (void)r; (void)q; ff_tex[0]=s; ff_tex[1]=t; }
+
+void glMatrixMode(GLenum mode)  { ff_init(); ff_mode = mode; }
+void glLoadIdentity(void)       { ff_init(); m_ident(ff_cur()); }
+void glLoadMatrixf(const GLfloat *m) { if (m) memcpy(ff_cur(), m, 16 * sizeof(GLfloat)); }
+void glLoadMatrixd(const GLdouble *m)
+{
+    if (!m) return;
+    GLfloat f[16];
+    for (int i = 0; i < 16; i++) f[i] = (GLfloat)m[i];
+    memcpy(ff_cur(), f, sizeof f);
+}
+void glMultMatrixf(const GLfloat *m) { if (m) m_mul(ff_cur(), ff_cur(), m); }
+void glMultMatrixd(const GLdouble *m)
+{
+    if (!m) return;
+    GLfloat f[16];
+    for (int i = 0; i < 16; i++) f[i] = (GLfloat)m[i];
+    m_mul(ff_cur(), ff_cur(), f);
+}
+void glPushMatrix(void)
+{
+    GLfloat *c = ff_cur();
+    if (ff_sp < FF_STACK_MAX) { memcpy(ff_stack[ff_sp], c, 16 * sizeof(GLfloat)); ff_stack_mode[ff_sp] = ff_mode; ff_sp++; }
+}
+void glPopMatrix(void)
+{
+    GLfloat *c = ff_cur();
+    if (ff_sp > 0) { ff_sp--; memcpy(c, ff_stack[ff_sp], 16 * sizeof(GLfloat)); ff_mode = ff_stack_mode[ff_sp]; }
+}
+void glTranslatef(GLfloat x, GLfloat y, GLfloat z) { m_translate(ff_cur(), x, y, z); }
+void glTranslated(GLdouble x, GLdouble y, GLdouble z) { m_translate(ff_cur(), (GLfloat)x, (GLfloat)y, (GLfloat)z); }
+void glTranslatefv(const GLfloat *v) { if (v) m_translate(ff_cur(), v[0], v[1], v[2]); }
+void glRotatef(GLfloat a, GLfloat x, GLfloat y, GLfloat z) { m_rotate(ff_cur(), a, x, y, z); }
+void glRotated(GLdouble a, GLdouble x, GLdouble y, GLdouble z) { m_rotate(ff_cur(), (GLfloat)a, (GLfloat)x, (GLfloat)y, (GLfloat)z); }
+void glScalef(GLfloat x, GLfloat y, GLfloat z) { m_scale(ff_cur(), x, y, z); }
+void glScaled(GLdouble x, GLdouble y, GLdouble z) { m_scale(ff_cur(), (GLfloat)x, (GLfloat)y, (GLfloat)z); }
+void glOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t, GLdouble n, GLdouble f)
+{ m_ortho(ff_cur(), (GLfloat)l, (GLfloat)r, (GLfloat)b, (GLfloat)t, (GLfloat)n, (GLfloat)f); }
+void glFrustum(GLdouble l, GLdouble r, GLdouble b, GLdouble t, GLdouble n, GLdouble f)
+{ m_frustum(ff_cur(), (GLfloat)l, (GLfloat)r, (GLfloat)b, (GLfloat)t, (GLfloat)n, (GLfloat)f); }
 void glPolygonMode(GLenum face, GLenum mode) { (void)face; (void)mode; }
 void glDrawBuffer(GLenum mode) { (void)mode; }
 void glReadBuffer(GLenum mode) { (void)mode; }
+static void ff_rect(GLfloat x1, GLfloat y1, GLfloat x2, GLfloat y2)
+{
+    if (ff_in_begin) ff_end();
+    ff_init();
+    ff_in_begin = 1;
+    ff_prim = GL_QUADS;
+    ff_n = 0;
+    ff_push(x1, y1, 0);
+    ff_push(x2, y1, 0);
+    ff_push(x2, y2, 0);
+    ff_push(x1, y2, 0);
+    ff_end();
+}
+
+void glRectf(GLfloat x1, GLfloat y1, GLfloat x2, GLfloat y2) { ff_rect(x1, y1, x2, y2); }
+void glRecti(GLint x1, GLint y1, GLint x2, GLint y2) { ff_rect((GLfloat)x1, (GLfloat)y1, (GLfloat)x2, (GLfloat)y2); }
+void glRectd(GLdouble x1, GLdouble y1, GLdouble x2, GLdouble y2) { ff_rect((GLfloat)x1, (GLfloat)y1, (GLfloat)x2, (GLfloat)y2); }
+void glRectfv(const GLfloat *a, const GLfloat *b) { if (a && b) ff_rect(a[0], a[1], b[0], b[1]); }
+void glRectiv(const GLint *a, const GLint *b) { if (a && b) ff_rect((GLfloat)a[0], (GLfloat)a[1], (GLfloat)b[0], (GLfloat)b[1]); }
+void glRectdv(const GLdouble *a, const GLdouble *b) { if (a && b) ff_rect((GLfloat)a[0], (GLfloat)a[1], (GLfloat)b[0], (GLfloat)b[1]); }
 
 void glGetDoublev(GLenum pname, GLdouble *params)
 {
