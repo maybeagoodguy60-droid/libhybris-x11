@@ -1214,7 +1214,7 @@ static void ff_push(GLfloat x, GLfloat y, GLfloat z)
 static void ff_draw_arrays(GLenum mode, const FFVert *v, int n, const GLfloat *fc)
 {
     if (n < 1) return;
-    FFVert *o = (FFVert *)malloc((size_t)n * sizeof *o);
+    FFVert *o = (FFVert *)malloc((size_t)3 * (size_t)n * sizeof *o);
     if (!o) return;
     GLenum m = mode;
     int flat = (ff_shade == GL_FLAT) && fc;
