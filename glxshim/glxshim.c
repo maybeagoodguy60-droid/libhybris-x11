@@ -807,6 +807,7 @@ void glBindVertexArray(GLuint a)      { load_gles(); if(pfBindVertexArray) pfBin
 void glDeleteVertexArrays(GLsizei n,const GLuint *v){ load_gles(); if(pfDeleteVertexArrays) pfDeleteVertexArrays(n,v); }
 
 /* state we must not blindly forward: report our own identity */
+static const char *shim_ext_string(void);
 void glGetIntegerv(GLenum pname, GLint *data)
 {
     load_gles();
@@ -821,6 +822,43 @@ void glGetFloatv(GLenum p, GLfloat *d)  { load_gles(); if (pfGetFloatv) pfGetFlo
 void glGetBooleanv(GLenum p, GLboolean *d){ load_gles(); if (pfGetBooleanv) pfGetBooleanv(p, d); }
 
 static char extstr[4096];
+static char ext_ret[256];
+
+static const char *shim_ext_string(void)
+{
+    load_gles();
+    const char *base = pfGetString ? (const char *)pfGetString(GL_EXTENSIONS) : NULL;
+    snprintf(extstr, sizeof extstr,
+             "%s%s", base ? base : "",
+             " GL_EXT_framebuffer_object GL_EXT_texture_object"
+             " GL_OES_mapbuffer GL_OES_framebuffer_object"
+             " GL_ARB_texture_non_power_of_two GL_ARB_vertex_buffer_object"
+             " GL_EXT_blend_func_separate GL_EXT_blend_equation_separate");
+    return extstr;
+}
+
+const GLubyte *glGetStringi(GLenum name, GLuint index)
+{
+    if (name != GL_EXTENSIONS) return NULL;
+    const char *s = shim_ext_string();
+    GLuint i = 0;
+    while (*s) {
+        while (*s == ' ') s++;
+        if (!*s) break;
+        if (i == index) {
+            const char *end = s;
+            while (*end && *end != ' ') end++;
+            size_t len = (size_t)(end - s);
+            if (len >= sizeof ext_ret) len = sizeof ext_ret - 1;
+            memcpy(ext_ret, s, len);
+            ext_ret[len] = '\0';
+            return (const GLubyte *)ext_ret;
+        }
+        i++;
+        while (*s && *s != ' ') s++;
+    }
+    return NULL;
+}
 
 const GLubyte *glGetString(GLenum name)
 {
@@ -829,18 +867,8 @@ const GLubyte *glGetString(GLenum name)
     case GL_VERSION:    return (const GLubyte *)"3.0 (Core Profile) glxshim 1.0 (GLES3 backend)";
     case GL_RENDERER:   return (const GLubyte *)"Mali-G57 MC2 (glxshim, GLES3 backend)";
     case GL_VENDOR:     return (const GLubyte *)"Termux X11 glxshim";
-    case GL_SHADING_LANGUAGE_VERSION: return (const GLubyte *)"300 es";
-    case GL_EXTENSIONS: {
-        load_gles();
-        const char *base = pfGetString ? (const char *)pfGetString(GL_EXTENSIONS) : NULL;
-        snprintf(extstr, sizeof extstr,
-                 "%s%s", base ? base : "",
-                 " GL_EXT_framebuffer_object GL_EXT_texture_object"
-                 " GL_OES_mapbuffer GL_OES_framebuffer_object"
-                 " GL_ARB_texture_non_power_of_two GL_ARB_vertex_buffer_object"
-                 " GL_EXT_blend_func_separate GL_EXT_blend_equation_separate");
-        return (const GLubyte *)extstr;
-    }
+    case GL_SHADING_LANGUAGE_VERSION: return (const GLubyte *)"3.30";
+    case GL_EXTENSIONS: return (const GLubyte *)shim_ext_string();
     default:            load_gles(); return NULL;
     }
 }
