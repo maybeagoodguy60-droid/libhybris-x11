@@ -22,6 +22,7 @@
 #include <math.h>
 #include <dlfcn.h>
 #include <link.h>
+#include <ctype.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -107,6 +108,51 @@ typedef void (*__GLXextFuncPtr)(void);
 #define GLX_BAD_VISUAL                   4
 #define GL_CONTEXT_PROFILE_MASK         0x9126
 #define GL_CONTEXT_CORE_PROFILE_BIT     0x00000001
+
+/* ---- GL 4.3-family entry points served on the GLES3.2 backend ---------- */
+/* Shader types (ES 3.1/3.2 + EXT extensions; values are shared spec text). */
+#define GL_GEOMETRY_SHADER              0x8DD9
+#define GL_TESS_CONTROL_SHADER          0x8E88
+#define GL_TESS_EVALUATION_SHADER       0x8E87
+#define GL_COMPUTE_SHADER               0x91B9
+/* Buffer targets / desktop pnames we store or mask ourselves. */
+#define GL_SHADER_STORAGE_BUFFER        0x90D2
+#define GL_ATOMIC_COUNTER_BUFFER        0x92C0
+#define GL_TEXTURE_BUFFER               0x8C2A
+#define GL_BUFFER_SIZE                  0x8764
+#define GL_PATCHES                      0x000E
+#define GL_PATCH_VERTICES               0x8E72
+/* glMapBuffer (desktop) access -> glMapBufferRange flags */
+#define GL_READ_ONLY                    0x88B8
+#define GL_WRITE_ONLY                   0x88B9
+#define GL_READ_WRITE                   0x88BA
+#define GL_MAP_READ_BIT                 0x0001
+#define GL_MAP_WRITE_BIT                0x0002
+#define GL_MAP_FLUSH_EXPLICIT_BIT       0x0010
+/* glMemoryBarrier: mask desktop barrier bits down to the GLES set so that
+ * GL_ALL_BARRIER_BITS (which includes GL_QUERY_BUFFER_BARRIER_BIT etc. that
+ * GLES does not know) cannot make the blob raise an error. */
+#define GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT       0x00000001
+#define GL_ELEMENT_ARRAY_BARRIER_BIT             0x00000002
+#define GL_UNIFORM_BARRIER_BIT                   0x00000004
+#define GL_TEXTURE_FETCH_BARRIER_BIT             0x00000008
+#define GL_SHADER_IMAGE_ACCESS_BARRIER_BIT       0x00000020
+#define GL_COMMAND_BARRIER_BIT                   0x00000040
+#define GL_PIXEL_BUFFER_BARRIER_BIT              0x00000080
+#define GL_TEXTURE_UPDATE_BARRIER_BIT            0x00000100
+#define GL_BUFFER_UPDATE_BARRIER_BIT             0x00000200
+#define GL_FRAMEBUFFER_BARRIER_BIT               0x00000400
+#define GL_TRANSFORM_FEEDBACK_BARRIER_BIT        0x00000800
+#define GL_ATOMIC_COUNTER_BARRIER_BIT            0x00001000
+#define GL_SHADER_STORAGE_BARRIER_BIT            0x00002000
+#define GL_ES_ALL_BARRIER_BITS \
+    (GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_ELEMENT_ARRAY_BARRIER_BIT | \
+     GL_UNIFORM_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT | \
+     GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_COMMAND_BARRIER_BIT | \
+     GL_PIXEL_BUFFER_BARRIER_BIT | GL_TEXTURE_UPDATE_BARRIER_BIT | \
+     GL_BUFFER_UPDATE_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT | \
+     GL_TRANSFORM_FEEDBACK_BARRIER_BIT | GL_ATOMIC_COUNTER_BARRIER_BIT | \
+     GL_SHADER_STORAGE_BARRIER_BIT)
 
 #ifndef EGL_NO_CONFIG_KHR
 #define EGL_NO_CONFIG_KHR ((EGLConfig)0)
@@ -202,7 +248,136 @@ static EGLSurface  (*p_eglGetCurrentSurface)(EGLint);
     FV(void,  pfDisableVertexAttribArray, glDisableVertexAttribArray, (GLuint)) \
     FV(void,  pfGenVertexArrays,       glGenVertexArrays,         (GLsizei, GLuint *)) \
     FV(void,  pfBindVertexArray,       glBindVertexArray,         (GLuint)) \
-    FV(void,  pfDeleteVertexArrays,    glDeleteVertexArrays,      (GLsizei, const GLuint *))
+    FV(void,  pfDeleteVertexArrays,    glDeleteVertexArrays,      (GLsizei, const GLuint *)) \
+    FV(void,  pfDispatchCompute,          glDispatchCompute,            (GLuint, GLuint, GLuint)) \
+    FV(void,  pfDispatchComputeIndirect,  glDispatchComputeIndirect,    (GLintptr)) \
+    FV(void,  pfDrawArraysIndirect,       glDrawArraysIndirect,         (GLenum, const void *)) \
+    FV(void,  pfDrawElementsIndirect,     glDrawElementsIndirect,       (GLenum, GLenum, const void *)) \
+    FV(void,  pfShaderStorageBlockBinding, glShaderStorageBlockBinding, (GLuint, GLuint, GLuint)) \
+    FV(GLuint,pfGetProgramResourceIndex,  glGetProgramResourceIndex,    (GLuint, GLenum, const GLchar *)) \
+    FV(void,  pfGetProgramResourceName,   glGetProgramResourceName,     (GLuint, GLenum, GLuint, GLsizei, GLsizei *, GLchar *)) \
+    FV(void,  pfGetProgramResourceiv,     glGetProgramResourceiv,       (GLuint, GLenum, GLuint, GLsizei, const GLenum *, GLsizei, GLsizei *, GLint *)) \
+    FV(void,  pfGetProgramInterfaceiv,    glGetProgramInterfaceiv,      (GLuint, GLenum, GLenum, GLint *)) \
+    FV(void,  pfProgramUniform1f,         glProgramUniform1f,           (GLuint, GLint, GLfloat)) \
+    FV(void,  pfProgramUniform2f,         glProgramUniform2f,           (GLuint, GLint, GLfloat, GLfloat)) \
+    FV(void,  pfProgramUniform3f,         glProgramUniform3f,           (GLuint, GLint, GLfloat, GLfloat, GLfloat)) \
+    FV(void,  pfProgramUniform4f,         glProgramUniform4f,           (GLuint, GLint, GLfloat, GLfloat, GLfloat, GLfloat)) \
+    FV(void,  pfProgramUniform1i,         glProgramUniform1i,           (GLuint, GLint, GLint)) \
+    FV(void,  pfProgramUniform2i,         glProgramUniform2i,           (GLuint, GLint, GLint, GLint)) \
+    FV(void,  pfProgramUniform3i,         glProgramUniform3i,           (GLuint, GLint, GLint, GLint, GLint)) \
+    FV(void,  pfProgramUniform4i,         glProgramUniform4i,           (GLuint, GLint, GLint, GLint, GLint, GLint)) \
+    FV(void,  pfProgramUniform1ui,        glProgramUniform1ui,          (GLuint, GLint, GLuint)) \
+    FV(void,  pfProgramUniform2ui,        glProgramUniform2ui,          (GLuint, GLint, GLuint, GLuint)) \
+    FV(void,  pfProgramUniform3ui,        glProgramUniform3ui,          (GLuint, GLint, GLuint, GLuint, GLuint)) \
+    FV(void,  pfProgramUniform4ui,        glProgramUniform4ui,          (GLuint, GLint, GLuint, GLuint, GLuint, GLuint)) \
+    FV(void,  pfProgramUniform1fv,        glProgramUniform1fv,          (GLuint, GLint, GLsizei, const GLfloat *)) \
+    FV(void,  pfProgramUniform2fv,        glProgramUniform2fv,          (GLuint, GLint, GLsizei, const GLfloat *)) \
+    FV(void,  pfProgramUniform3fv,        glProgramUniform3fv,          (GLuint, GLint, GLsizei, const GLfloat *)) \
+    FV(void,  pfProgramUniform4fv,        glProgramUniform4fv,          (GLuint, GLint, GLsizei, const GLfloat *)) \
+    FV(void,  pfProgramUniform1iv,        glProgramUniform1iv,          (GLuint, GLint, GLsizei, const GLint *)) \
+    FV(void,  pfProgramUniform2iv,        glProgramUniform2iv,          (GLuint, GLint, GLsizei, const GLint *)) \
+    FV(void,  pfProgramUniform3iv,        glProgramUniform3iv,          (GLuint, GLint, GLsizei, const GLint *)) \
+    FV(void,  pfProgramUniform4iv,        glProgramUniform4iv,          (GLuint, GLint, GLsizei, const GLint *)) \
+    FV(void,  pfProgramUniform1uiv,       glProgramUniform1uiv,         (GLuint, GLint, GLsizei, const GLuint *)) \
+    FV(void,  pfProgramUniform2uiv,       glProgramUniform2uiv,         (GLuint, GLint, GLsizei, const GLuint *)) \
+    FV(void,  pfProgramUniform3uiv,       glProgramUniform3uiv,         (GLuint, GLint, GLsizei, const GLuint *)) \
+    FV(void,  pfProgramUniform4uiv,       glProgramUniform4uiv,         (GLuint, GLint, GLsizei, const GLuint *)) \
+    FV(void,  pfProgramUniformMatrix2fv,  glProgramUniformMatrix2fv,    (GLuint, GLint, GLsizei, GLboolean, const GLfloat *)) \
+    FV(void,  pfProgramUniformMatrix3fv,  glProgramUniformMatrix3fv,    (GLuint, GLint, GLsizei, GLboolean, const GLfloat *)) \
+    FV(void,  pfProgramUniformMatrix4fv,  glProgramUniformMatrix4fv,    (GLuint, GLint, GLsizei, GLboolean, const GLfloat *)) \
+    FV(void,  pfProgramUniformMatrix2x3fv,glProgramUniformMatrix2x3fv,  (GLuint, GLint, GLsizei, GLboolean, const GLfloat *)) \
+    FV(void,  pfProgramUniformMatrix3x2fv,glProgramUniformMatrix3x2fv,  (GLuint, GLint, GLsizei, GLboolean, const GLfloat *)) \
+    FV(void,  pfProgramUniformMatrix2x4fv,glProgramUniformMatrix2x4fv,  (GLuint, GLint, GLsizei, GLboolean, const GLfloat *)) \
+    FV(void,  pfProgramUniformMatrix4x2fv,glProgramUniformMatrix4x2fv,  (GLuint, GLint, GLsizei, GLboolean, const GLfloat *)) \
+    FV(void,  pfProgramUniformMatrix3x4fv,glProgramUniformMatrix3x4fv,  (GLuint, GLint, GLsizei, GLboolean, const GLfloat *)) \
+    FV(void,  pfProgramUniformMatrix4x3fv,glProgramUniformMatrix4x3fv,  (GLuint, GLint, GLsizei, GLboolean, const GLfloat *)) \
+    FV(void,  pfBindImageTexture,         glBindImageTexture,           (GLuint, GLuint, GLint, GLboolean, GLint, GLenum, GLenum)) \
+    FV(void,  pfMemoryBarrier,            glMemoryBarrier,              (GLbitfield)) \
+    FV(void,  pfMemoryBarrierByRegion,    glMemoryBarrierByRegion,      (GLbitfield)) \
+    FV(void,  pfVertexAttribFormat,       glVertexAttribFormat,         (GLuint, GLint, GLenum, GLboolean, GLuint)) \
+    FV(void,  pfVertexAttribIFormat,      glVertexAttribIFormat,        (GLuint, GLint, GLenum, GLuint)) \
+    FV(void,  pfVertexAttribBinding,      glVertexAttribBinding,        (GLuint, GLuint)) \
+    FV(void,  pfVertexBindingDivisor,     glVertexBindingDivisor,       (GLuint, GLuint)) \
+    FV(void,  pfBindVertexBuffer,         glBindVertexBuffer,           (GLuint, GLuint, GLintptr, GLsizei)) \
+    FV(void,  pfClearBufferfv,            glClearBufferfv,              (GLenum, GLint, const GLfloat *)) \
+    FV(void,  pfClearBufferiv,            glClearBufferiv,              (GLenum, GLint, const GLint *)) \
+    FV(void,  pfClearBufferuiv,           glClearBufferuiv,             (GLenum, GLint, const GLuint *)) \
+    FV(void,  pfClearBufferfi,            glClearBufferfi,              (GLenum, GLint, GLfloat, GLint)) \
+    FV(void,  pfInvalidateFramebuffer,    glInvalidateFramebuffer,      (GLenum, GLsizei, const GLenum *)) \
+    FV(void,  pfInvalidateSubFramebuffer, glInvalidateSubFramebuffer,   (GLenum, GLsizei, const GLenum *, GLint, GLint, GLsizei, GLsizei)) \
+    FV(void,  pfInvalidateBufferData,     glInvalidateBufferData,       (GLenum)) \
+    FV(void,  pfInvalidateBufferSubData,  glInvalidateBufferSubData,    (GLenum, GLintptr, GLsizeiptr)) \
+    FV(void,  pfGetInternalformativ,      glGetInternalformativ,        (GLenum, GLenum, GLenum, GLsizei, GLint *)) \
+    FV(GLsync,pfFenceSync,                glFenceSync,                  (GLenum, GLbitfield)) \
+    FV(GLboolean,pfIsSync,                glIsSync,                     (GLsync)) \
+    FV(void,  pfDeleteSync,               glDeleteSync,                 (GLsync)) \
+    FV(GLenum,pfClientWaitSync,           glClientWaitSync,             (GLsync, GLbitfield, GLuint64)) \
+    FV(void,  pfWaitSync,                 glWaitSync,                   (GLsync, GLbitfield, GLuint64)) \
+    FV(void,  pfGetSynciv,                glGetSynciv,                  (GLsync, GLenum, GLsizei, GLsizei *, GLint *)) \
+    FV(void,  pfCopyBufferSubData,        glCopyBufferSubData,          (GLenum, GLenum, GLintptr, GLintptr, GLsizeiptr)) \
+    FV(void,  pfGetBufferParameteriv,     glGetBufferParameteriv,       (GLenum, GLenum, GLint *)) \
+    FV(void,  pfGetBufferParameteri64v,   glGetBufferParameteri64v,     (GLenum, GLenum, GLint64 *)) \
+    FV(void *, pfMapBufferRange,          glMapBufferRange,             (GLenum, GLintptr, GLsizeiptr, GLbitfield)) \
+    FV(GLboolean,pfUnmapBuffer,           glUnmapBuffer,                (GLenum)) \
+    FV(void,  pfFlushMappedBufferRange,   glFlushMappedBufferRange,     (GLenum, GLintptr, GLsizeiptr)) \
+    FV(void,  pfBindBufferBase,           glBindBufferBase,             (GLenum, GLuint, GLuint)) \
+    FV(void,  pfBindBufferRange,          glBindBufferRange,            (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr)) \
+    FV(GLuint,pfGetUniformBlockIndex,     glGetUniformBlockIndex,       (GLuint, const GLchar *)) \
+    FV(void,  pfUniformBlockBinding,      glUniformBlockBinding,        (GLuint, GLuint, GLuint)) \
+    FV(void,  pfGetActiveUniformBlockiv,  glGetActiveUniformBlockiv,    (GLuint, GLuint, GLenum, GLint *)) \
+    FV(void,  pfGetActiveUniformBlockName, glGetActiveUniformBlockName, (GLuint, GLuint, GLsizei, GLsizei *, GLchar *)) \
+    FV(void,  pfGetUniformIndices,        glGetUniformIndices,          (GLuint, GLsizei, const GLchar *const *, GLuint *)) \
+    FV(void,  pfGetActiveUniformsiv,      glGetActiveUniformsiv,        (GLuint, GLsizei, const GLuint *, GLenum, GLint *)) \
+    FV(void,  pfBindTransformFeedback,    glBindTransformFeedback,      (GLenum, GLuint)) \
+    FV(void,  pfDeleteTransformFeedbacks, glDeleteTransformFeedbacks,   (GLsizei, const GLuint *)) \
+    FV(void,  pfGenTransformFeedbacks,    glGenTransformFeedbacks,      (GLsizei, GLuint *)) \
+    FV(GLboolean,pfIsTransformFeedback,   glIsTransformFeedback,        (GLuint)) \
+    FV(void,  pfBeginTransformFeedback,   glBeginTransformFeedback,     (GLenum)) \
+    FV(void,  pfEndTransformFeedback,     glEndTransformFeedback,       (void)) \
+    FV(void,  pfPauseTransformFeedback,   glPauseTransformFeedback,     (void)) \
+    FV(void,  pfResumeTransformFeedback,  glResumeTransformFeedback,    (void)) \
+    FV(void,  pfTransformFeedbackVaryings, glTransformFeedbackVaryings, (GLuint, GLsizei, const GLchar *const *, GLenum)) \
+    FV(void,  pfGetTransformFeedbackVarying, glGetTransformFeedbackVarying,(GLuint, GLuint, GLsizei, GLsizei *, GLsizei *, GLenum *, GLchar *)) \
+    FV(void,  pfActiveTexture,            glActiveTexture,              (GLenum)) \
+    FV(void,  pfTexStorage2DMultisample,  glTexStorage2DMultisample,    (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLboolean)) \
+    FV(void,  pfTexStorage3DMultisample,  glTexStorage3DMultisample,    (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei, GLboolean)) \
+    FV(void,  pfMinSampleShading,         glMinSampleShading,           (GLfloat)) \
+    FV(void,  pfGetIntegeri_v,            glGetIntegeri_v,              (GLenum, GLuint, GLint *)) \
+    FV(void,  pfGetInteger64v,            glGetInteger64v,              (GLenum, GLint64 *)) \
+    FV(void,  pfGetInteger64i_v,          glGetInteger64i_v,            (GLenum, GLuint, GLint64 *)) \
+    FV(void,  pfGetInteger64,             glGetInteger64,               (GLenum, GLint64 *)) \
+    FV(void,  pfDepthRangef,              glDepthRangef,                (GLfloat, GLfloat)) \
+    FV(void,  pfClearDepthf,              glClearDepthf,                (GLfloat)) \
+    FV(void,  pfBlendFuncSeparate,        glBlendFuncSeparate,          (GLenum, GLenum, GLenum, GLenum)) \
+    FV(void,  pfBlendEquation,            glBlendEquation,              (GLenum)) \
+    FV(void,  pfBlendEquationSeparate,    glBlendEquationSeparate,      (GLenum, GLenum)) \
+    FV(void,  pfBlendColor,               glBlendColor,                 (GLfloat, GLfloat, GLfloat, GLfloat)) \
+    FV(void,  pfFramebufferTextureLayer,  glFramebufferTextureLayer,    (GLenum, GLenum, GLuint, GLint, GLint)) \
+    FV(GLint, pfGetFragDataLocation,      glGetFragDataLocation,        (GLuint, const GLchar *)) \
+    FV(void,  pfBindSampler,              glBindSampler,                (GLuint, GLuint)) \
+    FV(void,  pfGenSamplers,              glGenSamplers,                (GLsizei, GLuint *)) \
+    FV(void,  pfDeleteSamplers,           glDeleteSamplers,             (GLsizei, const GLuint *)) \
+    FV(GLboolean,pfIsSampler,             glIsSampler,                  (GLuint)) \
+    FV(void,  pfSamplerParameteri,        glSamplerParameteri,          (GLuint, GLenum, GLint)) \
+    FV(void,  pfSamplerParameteriv,       glSamplerParameteriv,         (GLuint, GLenum, const GLint *)) \
+    FV(void,  pfSamplerParameterf,        glSamplerParameterf,          (GLuint, GLenum, GLfloat)) \
+    FV(void,  pfSamplerParameterfv,       glSamplerParameterfv,         (GLuint, GLenum, const GLfloat *)) \
+    FV(void,  pfGetSamplerParameteriv,    glGetSamplerParameteriv,      (GLuint, GLenum, GLint *)) \
+    FV(void,  pfGetSamplerParameterfv,    glGetSamplerParameterfv,      (GLuint, GLenum, GLfloat *)) \
+    FV(void,  pfTexParameterf,            glTexParameterf,              (GLenum, GLenum, GLfloat)) \
+    FV(void,  pfTexParameterfv,           glTexParameterfv,             (GLenum, GLenum, const GLfloat *)) \
+    FV(void,  pfTexParameteri,            glTexParameteri,              (GLenum, GLenum, GLint)) \
+    FV(void,  pfTexParameteriv,           glTexParameteriv,             (GLenum, GLenum, const GLint *)) \
+    FV(void,  pfGetTexParameterfv,        glGetTexParameterfv,          (GLenum, GLenum, GLfloat *)) \
+    FV(void,  pfGetTexParameteriv,        glGetTexParameteriv,          (GLenum, GLenum, GLint *)) \
+    FV(void,  pfTexBufferEXT,             glTexBufferEXT,               (GLenum, GLenum, GLuint)) \
+    FV(void,  pfTexBufferRangeEXT,        glTexBufferRangeEXT,          (GLenum, GLenum, GLintptr, GLsizeiptr, GLuint)) \
+    FV(void,  pfBufferStorageEXT,         glBufferStorageEXT,           (GLenum, GLsizeiptr, const void *, GLbitfield)) \
+    FV(void,  pfCopyImageSubDataEXT,      glCopyImageSubDataEXT,        (GLenum, GLuint, GLint, GLint, GLint, GLenum, GLuint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei)) \
+    FV(void,  pfPatchParameteri,          glPatchParameteri,            (GLenum, GLint)) \
+    FV(void,  pfDrawElementsBaseVertexEXT, glDrawElementsBaseVertexEXT,  (GLenum, GLsizei, GLenum, const void *, GLint)) \
+    FV(void,  pfDrawRangeElementsBaseVertexEXT, glDrawRangeElementsBaseVertexEXT, (GLenum, GLuint, GLuint, GLsizei, GLenum, const void *, GLint)) \
+    FV(void,  pfDrawElementsInstancedBaseVertexEXT, glDrawElementsInstancedBaseVertexEXT, (GLenum, GLsizei, GLenum, const void *, GLsizei, GLint))
 
 #define FV(ret, var, name, args) \
     typedef ret (*PFN_##var) args; \
@@ -244,6 +419,10 @@ static XVisualInfo *x_visual;
 static EGLDisplay   egl_dpy;
 static int          egl_ready;
 static int          swap_interval = 1;
+
+/* fail-fast: next glGetError returns this instead of flushing a bogus call
+ * into the GLES context that cannot express the desktop op. */
+static GLenum pending_err;
 
 #define HYBRIS_DIR      "/usr/lib/hybris"
 #define HYBRIS_SHIMS    "/usr/lib/hybris/gl-shims"
@@ -387,7 +566,7 @@ static int cfg_int(ShimFBConfig *c, int attr)
     case GLX_MAX_PBUFFER_PIXELS:   return 16384 * 16384;
     case GLX_SWAP_METHOD:          return GLX_SWAP_COPY;
     case GLX_FRAMEBUFFER_SRGB_CAPABLE_ARB: return True;
-    case GLX_CONTEXT_MAJOR_VERSION_ARB: return 3;
+    case GLX_CONTEXT_MAJOR_VERSION_ARB: return 4;
     case GLX_CONTEXT_MINOR_VERSION_ARB: return 3;
     case GLX_CONTEXT_PROFILE_MASK:  return GLX_CONTEXT_CORE_PROFILE_BIT;
     default:                       return 0;
@@ -730,6 +909,186 @@ void glXDestroyPbuffer(Display *d, GLXPbuffer p) { (void)d; (void)p; }
 int  glXQueryContext(Display *d, GLXContext c, int attr, int *val) { (void)d; (void)c; (void)attr; if (val) *val = 0; return 0; }
 int  glXQueryDrawable_legacy(Display *d, GLXDrawable dr, int a, unsigned int *v) { return glXQueryDrawable(d, dr, a, v); }
 
+/* ------------------------------------------------------------------ */
+/* GLSL version pinning                                                */
+/*                                                                     */
+/* A GLES compiler rejects a desktop GLSL #version prelude outright.   */
+/* Rather than translate the body (GL4ES/zink territory), we rewrite   */
+/* only the prelude and default-precision block: the ES 3.10/3.20      */
+/* shading languages are the same spec text as desktop GL 4.x for the  */
+/* compute / SSBO / image / atomic / tess / geometry family this shim  */
+/* serves, so the body passes through intact.                          */
+/* ------------------------------------------------------------------ */
+
+#define SHADER_SLOTS 512
+/* kept: the source string actually handed to GLES, kept alive until the
+ * shader is re-sourced or deleted: this blob reads the source at
+ * glCompileShader time (not a memcpy at glShaderSource time), so freeing
+ * early yields garbage lengths and compile failures. */
+static struct { GLuint id; GLenum type; char *kept; } shadertyp[SHADER_SLOTS];
+
+static GLenum shader_type(GLuint s)
+{
+    for (int i = 0; i < SHADER_SLOTS; i++)
+        if (shadertyp[i].id == s) return shadertyp[i].type;
+    return 0;
+}
+
+#define GL_FRAGMENT_SHADER 0x8B30
+
+/* desktop #extension name -> GLES equivalent (NULL = drop silently; the
+ * feature is core in ES3.1/3.2 or unsupported and would error anyway). */
+static const char *map_ext(const char *name, char *buf, size_t n)
+{
+    static const struct { const char *from, *to; } m[] = {
+        { "GL_ARB_gpu_shader5",             "GL_EXT_gpu_shader5" },
+        { "GL_ARB_sample_shading",          "GL_OES_sample_shading" },
+        { "GL_ARB_shader_image_load_store", "GL_EXT_shader_image_load_store" },
+        { "GL_ARB_tessellation_shader",     "GL_OES_tessellation_shader" },
+        { "GL_ARB_geometry_shader4",        "GL_OES_geometry_shader" },
+        { "GL_ARB_texture_buffer_range",    "GL_EXT_texture_buffer" },
+        { "GL_EXT_shader_image_load_store", NULL },
+        { "GL_ARB_shader_storage_buffer_object", NULL },
+        { "GL_ARB_compute_shader",          NULL },
+        { "GL_ARB_explicit_attrib_location",NULL },
+        { "GL_ARB_explicit_uniform_location",NULL },
+        { "GL_ARB_explicit_binding",        NULL },
+        { "GL_ARB_separate_shader_objects", NULL },
+        { "GL_ARB_fragment_coord_conventions", NULL },
+        { "GL_ARB_derivative_control",      NULL },
+        { "GL_ARB_enhanced_layouts",        NULL },
+        { "GL_ARB_uniform_buffer_object",   NULL },
+        { "GL_ARB_texture_cube_map",        NULL },
+        { "GL_ARB_texture_storage",         NULL },
+        { "GL_ARB_sampler_objects",         NULL },
+        { "GL_ARB_timer_query",             NULL },
+        { "GL_ARB_transform_feedback3",     NULL },
+        { "GL_ARB_color_buffer_float",      NULL },
+        { 0, 0 }
+    };
+    for (int i = 0; m[i].from; i++)
+        if (strcmp(name, m[i].from) == 0) {
+            if (!m[i].to) return NULL;
+            if (strlen(m[i].to) >= n) return NULL;
+            strcpy(buf, m[i].to);
+            return buf;
+        }
+    /* keep names the ES compiler already understands in all versions */
+    if (strncmp(name, "GL_EXT_", 7) == 0 || strncmp(name, "GL_OES_", 7) == 0 ||
+        strncmp(name, "GL_KHR_", 7) == 0 || strncmp(name, "GL_OVR_", 7) == 0)
+        return name;
+    return NULL;
+}
+
+/* Rewrite the prelude of a desktop-GLSL source for the GLES compiler.
+ * Returns 1 with *outp set (caller frees) when a rewrite happened,
+ * 0 when the source is already GLSL ES and must pass through untouched. */
+static int pin_glsl(GLenum type, const char *src, char **outp)
+{
+    const char *p = src;
+    int desktop_version = 0;
+    int saw_version = 0;
+    char target[16] = "";
+    char mapped[64];          /* one-line extension buffer */
+    char exts[1024];          /* accumulated extension directives */
+    exts[0] = '\0';
+    const char *body = src;
+
+    /* ---- scalar loop over the leading #directives ------------------ */
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        size_t linelen = eol ? (size_t)(eol - p) : strlen(p);
+        const char *t = p; size_t tl = linelen;
+        while (tl && (*t == ' ' || *t == '\t')) { t++; tl--; }
+        size_t ck = tl;
+        while (ck && (t[ck - 1] == '\r' || t[ck - 1] == ' ' || t[ck - 1] == '\t')) ck--;
+        if (ck == 0 || t[0] != '#') { body = p; break; }
+        char line[512];
+        if (ck >= sizeof line) ck = sizeof line - 1;
+        memcpy(line, t, ck); line[ck] = '\0';
+
+        if (strncmp(line, "#version", 8) == 0 &&
+            (line[8] == ' ' || line[8] == '\t')) {
+            saw_version = 1;
+            /* GLSL ES preludes are #version 100 or #version NNN es: keep. */
+            int is_es = (strstr(line, " es") != NULL);
+            if (is_es) return 0;
+            if (sscanf(line, "#version %d", &desktop_version) == 1) {
+                if (desktop_version == 100) return 0;   /* only ES uses this */
+            }
+        } else if (strncmp(line, "#extension", 10) == 0 &&
+                   (line[10] == ' ' || line[10] == '\t')) {
+            char name[128]; char beh[32];
+            if (sscanf(line, "#extension %127s : %31s", name, beh) == 2) {
+                const char *keep = map_ext(name, mapped, sizeof mapped);
+                if (keep)
+                    snprintf(exts + strlen(exts), sizeof exts - strlen(exts),
+                             "%s\n", line);
+                /* dropped: leave exts untouched (features are core or
+                 * unsupported; compile errors are the honest signal) */
+            }
+        }
+        size_t adv = linelen;
+        p += adv;
+        if (eol) p++;                      /* consume the newline too */
+    }
+    if (!saw_version)
+        return 0;   /* legacy source: attribute/varying/gl_FragColor is
+                     * valid in both desktop 1.10 and GLES 1.00 -- pass it
+                     * through untouched so the exact source (and its
+                     * length, which some callers verify) is preserved. */
+    if (desktop_version == 0)
+        desktop_version = 110;             /* #version present, old-style GLSL */
+
+    if (type == GL_COMPUTE_SHADER)              snprintf(target, sizeof target, "310 es");
+    else if (type == GL_GEOMETRY_SHADER ||
+             type == GL_TESS_CONTROL_SHADER ||
+             type == GL_TESS_EVALUATION_SHADER) snprintf(target, sizeof target, "320 es");
+    else if (desktop_version >= 130)            snprintf(target, sizeof target, "300 es");
+    else                                        snprintf(target, sizeof target, "100");
+
+    /* fragment shaders with a fresh GLSL 1.30+ prelude have no gl_FragColor
+     * builtin on GLES; rewrite the reference and add an output declaration. */
+    int rewrite_frag = (type == GL_FRAGMENT_SHADER && desktop_version >= 130 &&
+                        strstr(src, "gl_FragColor") != NULL);
+
+    /* sources that already carry a default-precision block (ES-style inputs
+     * and cross-compiled code) would error on a duplicate; desktop GLSL
+     * never uses the precision qualifier so we inject for those only. */
+    int need_precision = (strstr(src, "precision") == NULL);
+
+    size_t extra = 32 + strlen(exts) + (need_precision ? 160 : 0) +
+                   (rewrite_frag ? 64 : 0);
+    char *out = malloc(strlen(src) + extra + 1);
+    if (!out) return 0;
+    char *o = out;
+    o += sprintf(o, "#version %s\n", target);
+    o += sprintf(o, "%s", exts);
+    if (need_precision)
+        o += sprintf(o, "precision highp float;\nprecision highp int;\n"
+                        "precision mediump sampler2D;\nprecision mediump samplerCube;\n"
+                        "precision mediump sampler3D;\nprecision mediump sampler2DArray;\n");
+    if (rewrite_frag) o += sprintf(o, "out vec4 scoria_FragColor;\n");
+
+    /* copy the body, rewriting gl_FragColor for desktop 1.30+ fragment */
+    const char *s = body;
+    while (*s) {
+        if (rewrite_frag && strncmp(s, "gl_FragColor", 12) == 0) {
+            char nxt = s[12];
+            char prv = (s > body) ? s[-1] : '\0';
+            if (!isalnum((unsigned char)nxt) && nxt != '_' &&
+                !isalnum((unsigned char)prv) && prv != '_') {
+                memcpy(o, "scoria_FragColor", 16);
+                o += 16; s += 12; continue;
+            }
+        }
+        *o++ = *s++;
+    }
+    *o = '\0';
+    *outp = out;
+    return 1;
+}
+
 /* ---- GL entry points: forward to GLES ---- */
 
 static int  ff_tex_on;
@@ -738,8 +1097,14 @@ static int  ff_only(GLenum c);
 static void load_gles(void)
 {
     if (pfGetError || !eglGetProcAddress_f) return;
-#define FV(ret, var, name, args) var = (PFN_##var)eglGetProcAddress_f(#name);
-    GLES_FNS
+/* Prefer eglGetProcAddress, but some blobs keep core ES3.1 entry points out
+ * of it (e.g. glShaderStorageBlockBinding on this Mali driver); the shared
+ * libGLESv2 carries them for dlsym. */
+#define FV(ret, var, name, args) do { \
+        var = (PFN_##var)eglGetProcAddress_f(#name); \
+        if (!var) var = (PFN_##var)(gles_so ? sym(gles_so, #name) : 0); \
+    } while (0);
+GLES_FNS
 #undef FV
 }
 
@@ -772,7 +1137,12 @@ void glPointSize(GLfloat s)            { load_gles(); if(pfPointSize) pfPointSiz
 void glPixelStorei(GLenum p,GLint v)   { load_gles(); if(pfPixelStorei) pfPixelStorei(p,v); }
 void glFinish(void)                    { load_gles(); if(pfFinish) pfFinish(); }
 void glFlush(void)                     { load_gles(); if(pfFlush) pfFlush(); }
-GLenum glGetError(void)                { load_gles(); return pfGetError ? pfGetError() : 0; }
+GLenum glGetError(void)
+{
+    load_gles();
+    if (pending_err) { GLenum e = pending_err; pending_err = 0; return e; }
+    return pfGetError ? pfGetError() : 0;
+}
 void glDrawArrays(GLenum m,GLint f,GLsizei c){ load_gles(); if(pfDrawArrays) pfDrawArrays(m,f,c); }
 void glDrawElements(GLenum m,GLsizei c,GLenum t,const void *i){ load_gles(); if(pfDrawElements) pfDrawElements(m,c,t,i); }
 void glReadPixels(GLint x,GLint y,GLsizei w,GLsizei h,GLenum f,GLenum t,void *p){ load_gles(); if(pfReadPixels) pfReadPixels(x,y,w,h,f,t,p); }
@@ -783,12 +1153,109 @@ void glBindBuffer(GLenum t,GLuint b)   { load_gles(); if(pfBindBuffer) pfBindBuf
 void glBufferData(GLenum t,GLsizeiptr s,const void *d,GLenum u){ load_gles(); if(pfBufferData) pfBufferData(t,s,d,u); }
 void glBufferSubData(GLenum t,GLintptr o,GLsizeiptr s,const void *d){ load_gles(); if(pfBufferSubData) pfBufferSubData(t,o,s,d); }
 
-GLuint glCreateShader(GLenum t)        { load_gles(); return pfCreateShader ? pfCreateShader(t) : 0; }
-void glShaderSource(GLuint s,GLsizei c,const GLchar *const *v,const GLint *l){ load_gles(); if(pfShaderSource) pfShaderSource(s,c,v,l); }
-void glCompileShader(GLuint s)         { load_gles(); if(pfCompileShader) pfCompileShader(s); }
+GLuint glCreateShader(GLenum t)
+{
+    load_gles();
+    GLuint id = pfCreateShader ? pfCreateShader(t) : 0;
+    if (id) {
+        int slot = -1, free_slot = -1;
+        for (int i = 0; i < SHADER_SLOTS; i++) {
+            if (shadertyp[i].id == id) { slot = i; break; }
+            if (free_slot < 0 && !shadertyp[i].id && !shadertyp[i].type)
+                free_slot = i;
+        }
+        if (slot < 0 && free_slot >= 0) slot = free_slot;
+        if (slot >= 0) { shadertyp[slot].id = id; shadertyp[slot].type = t; }
+    }
+    return id;
+}
+
+void glShaderSource(GLuint s, GLsizei c, const GLchar *const *v, const GLint *l)
+{
+    load_gles();
+    if (!pfShaderSource || c <= 0 || !v) return;
+    /* join the buffers first: #version must sit on the very first line, and
+     * several engines keep splitting declarations across sources.  GLES only
+     * accepts a single source, so we must concatenate regardless. */
+    size_t total = 0;
+    int i;
+    for (i = 0; i < c; i++) {
+        size_t n = (l && l[i] >= 0) ? (size_t)l[i] : strlen(v[i]);
+        total += n;
+    }
+    char *joined = malloc(total + c + 1);
+    if (!joined) { pfShaderSource(s, c, v, l); return; }
+    char *p = joined;
+    for (i = 0; i < c; i++) {
+        size_t n = (l && l[i] >= 0) ? (size_t)l[i] : strlen(v[i]);
+        if (i > 0) *p++ = '\n';               /* whitespace between sources */
+        memcpy(p, v[i], n);
+        p += n;
+    }
+    *p = '\0';
+
+    char *pinned = NULL;
+    GLenum t = shader_type(s);
+    int pn = (t != 0) && pin_glsl(t, joined, &pinned);
+    char *forwarded = pn ? pinned : joined;   /* handed to GLES: keep alive */
+    const char *src = forwarded;
+    pfShaderSource(s, 1, &src, NULL);
+    if (pn) free(joined);                     /* only the other copy dies */
+    int kept = 0;
+    for (int i = 0; i < SHADER_SLOTS; i++)
+        if (shadertyp[i].id == s) {
+            free(shadertyp[i].kept);
+            shadertyp[i].kept = forwarded;
+            kept = 1;
+            break;
+        }
+    if (!kept) free(forwarded);               /* no slot: trust spec copy */
+}
+void glCompileShader(GLuint s)
+{
+    load_gles();
+    if (!pfCompileShader) return;
+    pfCompileShader(s);
+    if (dbg() && pfGetShaderiv && pfGetShaderInfoLog) {
+        GLint ok = 0;
+        pfGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+        if (!ok) {
+            const char *kept = NULL;
+            for (int i = 0; i < SHADER_SLOTS; i++)
+                if (shadertyp[i].id == s) { kept = shadertyp[i].kept; break; }
+            fprintf(stderr, "[shim] kept len=%zu type=0x%x\n",
+                    kept ? strlen(kept) : (size_t)0, shader_type(s));
+            if (kept) {
+                const char *nl = strchr(kept, '\n');
+                fprintf(stderr, "[shim] line1=[%.*s]\n",
+                        nl ? (int)(nl - kept) : 60, kept);
+            }
+            GLint len = 0;
+            pfGetShaderiv(s, GL_INFO_LOG_LENGTH, &len);
+            if (len > 0 && len < 8192) {
+                char log[8192];
+                GLsizei got = 0;
+                pfGetShaderInfoLog(s, len, &got, log);
+                fprintf(stderr, "[shim] compile FAIL shader=%u loglen=%d got=%d\n  [%s]\n",
+                        s, len, got, log);
+            }
+        }
+    }
+}
 void glGetShaderiv(GLuint s,GLenum p,GLint *v){ load_gles(); if(pfGetShaderiv) pfGetShaderiv(s,p,v); }
 void glGetShaderInfoLog(GLuint s,GLsizei m,GLsizei *l,GLchar *b){ load_gles(); if(pfGetShaderInfoLog) pfGetShaderInfoLog(s,m,l,b); }
-void glDeleteShader(GLuint s)          { load_gles(); if(pfDeleteShader) pfDeleteShader(s); }
+void glDeleteShader(GLuint s)
+{
+    for (int i = 0; i < SHADER_SLOTS; i++)
+        if (shadertyp[i].id == s) {
+            free(shadertyp[i].kept);
+            shadertyp[i].kept = NULL;
+            shadertyp[i].id = 0;
+            shadertyp[i].type = 0;
+        }
+    load_gles();
+    if (pfDeleteShader) pfDeleteShader(s);
+}
 GLuint glCreateProgram(void)           { load_gles(); return pfCreateProgram ? pfCreateProgram() : 0; }
 void glAttachShader(GLuint p,GLuint s) { load_gles(); if(pfAttachShader) pfAttachShader(p,s); }
 void glLinkProgram(GLuint p)           { load_gles(); if(pfLinkProgram) pfLinkProgram(p); }
@@ -811,15 +1278,276 @@ void glGenVertexArrays(GLsizei n,GLuint *v){ load_gles(); if(pfGenVertexArrays) 
 void glBindVertexArray(GLuint a)      { load_gles(); if(pfBindVertexArray) pfBindVertexArray(a); }
 void glDeleteVertexArrays(GLsizei n,const GLuint *v){ load_gles(); if(pfDeleteVertexArrays) pfDeleteVertexArrays(n,v); }
 
+/* ------------------------------------------------------------------ */
+/* GL 4.3 desktop trampolines                                          */
+/*                                                                     */
+/* The ES backend shares spec text and ABIs with desktop GL for the    */
+/* compute / SSBO / image / sync / buffer-storage family, so these     */
+/* wrappers are direct forwards.  A few differ:                       */
+/*  - glMemoryBarrier: mask out bits the ES blob cannot express.       */
+/*  - glBufferStorage/glFramebufferTexture: ES names differ.           */
+/*  - glMapBuffer: GLES has range-only mapping; emulate via range.     */
+/*  - unsupported core-4.3 entry points: fail-fast stubs.              */
+/* ------------------------------------------------------------------ */
+
+#define ES_ALL_BARRIER_BITS 0x3FFF
+
+static const GLbitfield barrier_mask = (GLbitfield)ES_ALL_BARRIER_BITS;
+
+void glDispatchCompute          (GLuint gx,GLuint gy,GLuint gz){ load_gles(); if(pfDispatchCompute) pfDispatchCompute(gx,gy,gz); }
+void glDispatchComputeIndirect  (GLintptr o)                    { load_gles(); if(pfDispatchComputeIndirect) pfDispatchComputeIndirect(o); }
+void glDrawArraysIndirect       (GLenum m,const void *i)        { load_gles(); if(pfDrawArraysIndirect) pfDrawArraysIndirect(m,i); }
+void glDrawElementsIndirect     (GLenum m,GLenum t,const void*i){ load_gles(); if(pfDrawElementsIndirect) pfDrawElementsIndirect(m,t,i); }
+void glShaderStorageBlockBinding(GLuint p,GLuint s,GLuint b)    { load_gles(); if(pfShaderStorageBlockBinding) pfShaderStorageBlockBinding(p,s,b); }
+GLuint glGetProgramResourceIndex(GLuint p,GLenum t,const GLchar*n){ load_gles(); return pfGetProgramResourceIndex?pfGetProgramResourceIndex(p,t,n):0; }
+void glGetProgramResourceName   (GLuint p,GLenum t,GLuint i,GLsizei b,GLsizei*l,GLchar*n){ load_gles(); if(pfGetProgramResourceName) pfGetProgramResourceName(p,t,i,b,l,n); }
+void glGetProgramResourceiv     (GLuint p,GLenum t,GLuint i,GLsizei c,const GLenum*pr,GLsizei b,GLsizei*l,GLint*v){ load_gles(); if(pfGetProgramResourceiv) pfGetProgramResourceiv(p,t,i,c,pr,b,l,v); }
+void glGetProgramInterfaceiv    (GLuint p,GLenum t,GLenum n,GLint*v){ load_gles(); if(pfGetProgramInterfaceiv) pfGetProgramInterfaceiv(p,t,n,v); }
+
+void glProgramUniform1f (GLuint p,GLint l,GLfloat x)          { load_gles(); if(pfProgramUniform1f) pfProgramUniform1f(p,l,x); }
+void glProgramUniform2f (GLuint p,GLint l,GLfloat a,GLfloat b){ load_gles(); if(pfProgramUniform2f) pfProgramUniform2f(p,l,a,b); }
+void glProgramUniform3f (GLuint p,GLint l,GLfloat a,GLfloat b,GLfloat c){ load_gles(); if(pfProgramUniform3f) pfProgramUniform3f(p,l,a,b,c); }
+void glProgramUniform4f (GLuint p,GLint l,GLfloat a,GLfloat b,GLfloat c,GLfloat d){ load_gles(); if(pfProgramUniform4f) pfProgramUniform4f(p,l,a,b,c,d); }
+void glProgramUniform1i (GLuint p,GLint l,GLint x)            { load_gles(); if(pfProgramUniform1i) pfProgramUniform1i(p,l,x); }
+void glProgramUniform2i (GLuint p,GLint l,GLint a,GLint b)    { load_gles(); if(pfProgramUniform2i) pfProgramUniform2i(p,l,a,b); }
+void glProgramUniform3i (GLuint p,GLint l,GLint a,GLint b,GLint c){ load_gles(); if(pfProgramUniform3i) pfProgramUniform3i(p,l,a,b,c); }
+void glProgramUniform4i (GLuint p,GLint l,GLint a,GLint b,GLint c,GLint d){ load_gles(); if(pfProgramUniform4i) pfProgramUniform4i(p,l,a,b,c,d); }
+void glProgramUniform1ui(GLuint p,GLint l,GLuint x)           { load_gles(); if(pfProgramUniform1ui) pfProgramUniform1ui(p,l,x); }
+void glProgramUniform2ui(GLuint p,GLint l,GLuint a,GLuint b)  { load_gles(); if(pfProgramUniform2ui) pfProgramUniform2ui(p,l,a,b); }
+void glProgramUniform3ui(GLuint p,GLint l,GLuint a,GLuint b,GLuint c){ load_gles(); if(pfProgramUniform3ui) pfProgramUniform3ui(p,l,a,b,c); }
+void glProgramUniform4ui(GLuint p,GLint l,GLuint a,GLuint b,GLuint c,GLuint d){ load_gles(); if(pfProgramUniform4ui) pfProgramUniform4ui(p,l,a,b,c,d); }
+void glProgramUniform1fv(GLuint p,GLint l,GLsizei n,const GLfloat*x){ load_gles(); if(pfProgramUniform1fv) pfProgramUniform1fv(p,l,n,x); }
+void glProgramUniform2fv(GLuint p,GLint l,GLsizei n,const GLfloat*x){ load_gles(); if(pfProgramUniform2fv) pfProgramUniform2fv(p,l,n,x); }
+void glProgramUniform3fv(GLuint p,GLint l,GLsizei n,const GLfloat*x){ load_gles(); if(pfProgramUniform3fv) pfProgramUniform3fv(p,l,n,x); }
+void glProgramUniform4fv(GLuint p,GLint l,GLsizei n,const GLfloat*x){ load_gles(); if(pfProgramUniform4fv) pfProgramUniform4fv(p,l,n,x); }
+void glProgramUniform1iv(GLuint p,GLint l,GLsizei n,const GLint*x){ load_gles(); if(pfProgramUniform1iv) pfProgramUniform1iv(p,l,n,x); }
+void glProgramUniform2iv(GLuint p,GLint l,GLsizei n,const GLint*x){ load_gles(); if(pfProgramUniform2iv) pfProgramUniform2iv(p,l,n,x); }
+void glProgramUniform3iv(GLuint p,GLint l,GLsizei n,const GLint*x){ load_gles(); if(pfProgramUniform3iv) pfProgramUniform3iv(p,l,n,x); }
+void glProgramUniform4iv(GLuint p,GLint l,GLsizei n,const GLint*x){ load_gles(); if(pfProgramUniform4iv) pfProgramUniform4iv(p,l,n,x); }
+void glProgramUniform1uiv(GLuint p,GLint l,GLsizei n,const GLuint*x){ load_gles(); if(pfProgramUniform1uiv) pfProgramUniform1uiv(p,l,n,x); }
+void glProgramUniform2uiv(GLuint p,GLint l,GLsizei n,const GLuint*x){ load_gles(); if(pfProgramUniform2uiv) pfProgramUniform2uiv(p,l,n,x); }
+void glProgramUniform3uiv(GLuint p,GLint l,GLsizei n,const GLuint*x){ load_gles(); if(pfProgramUniform3uiv) pfProgramUniform3uiv(p,l,n,x); }
+void glProgramUniform4uiv(GLuint p,GLint l,GLsizei n,const GLuint*x){ load_gles(); if(pfProgramUniform4uiv) pfProgramUniform4uiv(p,l,n,x); }
+void glProgramUniformMatrix2fv(GLuint p,GLint l,GLsizei n,GLboolean tr,const GLfloat*x){ load_gles(); if(pfProgramUniformMatrix2fv) pfProgramUniformMatrix2fv(p,l,n,tr,x); }
+void glProgramUniformMatrix3fv(GLuint p,GLint l,GLsizei n,GLboolean tr,const GLfloat*x){ load_gles(); if(pfProgramUniformMatrix3fv) pfProgramUniformMatrix3fv(p,l,n,tr,x); }
+void glProgramUniformMatrix4fv(GLuint p,GLint l,GLsizei n,GLboolean tr,const GLfloat*x){ load_gles(); if(pfProgramUniformMatrix4fv) pfProgramUniformMatrix4fv(p,l,n,tr,x); }
+void glProgramUniformMatrix2x3fv(GLuint p,GLint l,GLsizei n,GLboolean tr,const GLfloat*x){ load_gles(); if(pfProgramUniformMatrix2x3fv) pfProgramUniformMatrix2x3fv(p,l,n,tr,x); }
+void glProgramUniformMatrix3x2fv(GLuint p,GLint l,GLsizei n,GLboolean tr,const GLfloat*x){ load_gles(); if(pfProgramUniformMatrix3x2fv) pfProgramUniformMatrix3x2fv(p,l,n,tr,x); }
+void glProgramUniformMatrix2x4fv(GLuint p,GLint l,GLsizei n,GLboolean tr,const GLfloat*x){ load_gles(); if(pfProgramUniformMatrix2x4fv) pfProgramUniformMatrix2x4fv(p,l,n,tr,x); }
+void glProgramUniformMatrix4x2fv(GLuint p,GLint l,GLsizei n,GLboolean tr,const GLfloat*x){ load_gles(); if(pfProgramUniformMatrix4x2fv) pfProgramUniformMatrix4x2fv(p,l,n,tr,x); }
+void glProgramUniformMatrix3x4fv(GLuint p,GLint l,GLsizei n,GLboolean tr,const GLfloat*x){ load_gles(); if(pfProgramUniformMatrix3x4fv) pfProgramUniformMatrix3x4fv(p,l,n,tr,x); }
+void glProgramUniformMatrix4x3fv(GLuint p,GLint l,GLsizei n,GLboolean tr,const GLfloat*x){ load_gles(); if(pfProgramUniformMatrix4x3fv) pfProgramUniformMatrix4x3fv(p,l,n,tr,x); }
+
+void glBindImageTexture(GLuint u,GLuint t,GLint lv,GLboolean la,GLint li,GLenum a,GLenum f)
+    { load_gles(); if(pfBindImageTexture) pfBindImageTexture(u,t,lv,la,li,a,f); }
+void glMemoryBarrier(GLbitfield b)   { load_gles(); if(pfMemoryBarrier) pfMemoryBarrier(b & barrier_mask); }
+void glMemoryBarrierByRegion(GLbitfield b){ load_gles(); if(pfMemoryBarrierByRegion) pfMemoryBarrierByRegion(b & ES_ALL_BARRIER_BITS); }
+void glVertexAttribFormat(GLuint i,GLint s,GLenum t,GLboolean n,GLuint o)
+    { load_gles(); if(pfVertexAttribFormat) pfVertexAttribFormat(i,s,t,n,o); }
+void glVertexAttribIFormat(GLuint i,GLint s,GLenum t,GLuint o)
+    { load_gles(); if(pfVertexAttribIFormat) pfVertexAttribIFormat(i,s,t,o); }
+void glVertexAttribBinding(GLuint i,GLuint b)
+    { load_gles(); if(pfVertexAttribBinding) pfVertexAttribBinding(i,b); }
+void glVertexBindingDivisor(GLuint b,GLuint d)
+    { load_gles(); if(pfVertexBindingDivisor) pfVertexBindingDivisor(b,d); }
+void glBindVertexBuffer(GLuint b,GLuint v,GLintptr o,GLsizei s)
+    { load_gles(); if(pfBindVertexBuffer) pfBindVertexBuffer(b,v,o,s); }
+void glClearBufferfv(GLenum t,GLint d,const GLfloat*v) { load_gles(); if(pfClearBufferfv) pfClearBufferfv(t,d,v); }
+void glClearBufferiv(GLenum t,GLint d,const GLint*v)   { load_gles(); if(pfClearBufferiv) pfClearBufferiv(t,d,v); }
+void glClearBufferuiv(GLenum t,GLint d,const GLuint*v) { load_gles(); if(pfClearBufferuiv) pfClearBufferuiv(t,d,v); }
+void glClearBufferfi(GLenum t,GLint d,GLfloat v,GLint i){ load_gles(); if(pfClearBufferfi) pfClearBufferfi(t,d,v,i); }
+void glInvalidateFramebuffer(GLenum t,GLsizei n,const GLenum*a){ load_gles(); if(pfInvalidateFramebuffer) pfInvalidateFramebuffer(t,n,a); }
+void glInvalidateSubFramebuffer(GLenum t,GLsizei n,const GLenum*a,GLint x,GLint y,GLsizei w,GLsizei h)
+    { load_gles(); if(pfInvalidateSubFramebuffer) pfInvalidateSubFramebuffer(t,n,a,x,y,w,h); }
+void glInvalidateBufferData(GLenum t){ load_gles(); if(pfInvalidateBufferData) pfInvalidateBufferData(t); }
+void glInvalidateBufferSubData(GLenum t,GLintptr o,GLsizeiptr n){ load_gles(); if(pfInvalidateBufferSubData) pfInvalidateBufferSubData(t,o,n); }
+void glGetInternalformativ(GLenum t,GLenum f,GLenum p,GLsizei n,GLint*v){ load_gles(); if(pfGetInternalformativ) pfGetInternalformativ(t,f,p,n,v); }
+
+GLsync glFenceSync(GLenum c,GLbitfield f){ load_gles(); return pfFenceSync?pfFenceSync(c,f):0; }
+GLboolean glIsSync(GLsync s){ load_gles(); return pfIsSync?pfIsSync(s):GL_FALSE; }
+void glDeleteSync(GLsync s){ load_gles(); if(pfDeleteSync) pfDeleteSync(s); }
+GLenum glClientWaitSync(GLsync s,GLbitfield f,GLuint64 t){ load_gles(); return pfClientWaitSync?pfClientWaitSync(s,f,t):GL_WAIT_FAILED; }
+void glWaitSync(GLsync s,GLbitfield f,GLuint64 t){ load_gles(); if(pfWaitSync) pfWaitSync(s,f,t); }
+void glGetSynciv(GLsync s,GLenum p,GLsizei n,GLsizei*l,GLint*v){ load_gles(); if(pfGetSynciv) pfGetSynciv(s,p,n,l,v); }
+void glCopyBufferSubData(GLenum r,GLenum w,GLintptr ro,GLintptr wo,GLsizeiptr n)
+    { load_gles(); if(pfCopyBufferSubData) pfCopyBufferSubData(r,w,ro,wo,n); }
+void glGetBufferParameteriv(GLenum t,GLenum p,GLint*v){ load_gles(); if(pfGetBufferParameteriv) pfGetBufferParameteriv(t,p,v); }
+void glGetBufferParameteri64v(GLenum t,GLenum p,GLint64*v){ load_gles(); if(pfGetBufferParameteri64v) pfGetBufferParameteri64v(t,p,v); }
+void *glMapBuffer(GLenum t,GLenum acc)
+{
+    load_gles();
+    if (!pfMapBufferRange || !pfGetBufferParameteriv) return NULL;
+    GLint sz = 0;
+    pfGetBufferParameteriv(t, GL_BUFFER_SIZE, &sz);
+    /* desktop access enum (GL_READ_ONLY 0x88B8 ...) is unrelated to the
+     * glMapBufferRange bitmask; translate it explicitly. */
+    GLbitfield f;
+    switch (acc) {
+    case GL_READ_ONLY:  f = GL_MAP_READ_BIT; break;
+    case GL_WRITE_ONLY: f = GL_MAP_WRITE_BIT; break;
+    case GL_READ_WRITE: f = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT; break;
+    default:            f = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT; break;
+    }
+    return pfMapBufferRange(t, 0, sz > 0 ? sz : 0, f);
+}
+void *glMapBufferRange(GLenum t,GLintptr o,GLsizeiptr n,GLbitfield f)
+    { load_gles(); return pfMapBufferRange?pfMapBufferRange(t,o,n,f):NULL; }
+GLboolean glUnmapBuffer(GLenum t){ load_gles(); return pfUnmapBuffer?pfUnmapBuffer(t):GL_FALSE; }
+void glFlushMappedBufferRange(GLenum t,GLintptr o,GLsizeiptr n){ load_gles(); if(pfFlushMappedBufferRange) pfFlushMappedBufferRange(t,o,n); }
+void glBindBufferBase(GLenum t,GLuint i,GLuint b){ load_gles(); if(pfBindBufferBase) pfBindBufferBase(t,i,b); }
+void glBindBufferRange(GLenum t,GLuint i,GLuint b,GLintptr o,GLsizeiptr n){ load_gles(); if(pfBindBufferRange) pfBindBufferRange(t,i,b,o,n); }
+GLuint glGetUniformBlockIndex(GLuint p,const GLchar*n){ load_gles(); return pfGetUniformBlockIndex?pfGetUniformBlockIndex(p,n):GL_INVALID_INDEX; }
+void glUniformBlockBinding(GLuint p,GLuint i,GLuint b){ load_gles(); if(pfUniformBlockBinding) pfUniformBlockBinding(p,i,b); }
+void glGetActiveUniformBlockiv(GLuint p,GLuint i,GLenum q,GLint*v){ load_gles(); if(pfGetActiveUniformBlockiv) pfGetActiveUniformBlockiv(p,i,q,v); }
+void glGetActiveUniformBlockName(GLuint p,GLuint i,GLsizei n,GLsizei*l,GLchar*nm){ load_gles(); if(pfGetActiveUniformBlockName) pfGetActiveUniformBlockName(p,i,n,l,nm); }
+void glGetUniformIndices(GLuint p,GLsizei n,const GLchar*const*nm,GLuint*x){ load_gles(); if(pfGetUniformIndices) pfGetUniformIndices(p,n,nm,x); }
+void glGetActiveUniformsiv(GLuint p,GLsizei n,const GLuint*u,GLenum q,GLint*v){ load_gles(); if(pfGetActiveUniformsiv) pfGetActiveUniformsiv(p,n,u,q,v); }
+void glBindTransformFeedback(GLenum t,GLuint i){ load_gles(); if(pfBindTransformFeedback) pfBindTransformFeedback(t,i); }
+void glDeleteTransformFeedbacks(GLsizei n,const GLuint*x){ load_gles(); if(pfDeleteTransformFeedbacks) pfDeleteTransformFeedbacks(n,x); }
+void glGenTransformFeedbacks(GLsizei n,GLuint*x){ load_gles(); if(pfGenTransformFeedbacks) pfGenTransformFeedbacks(n,x); }
+GLboolean glIsTransformFeedback(GLuint i){ load_gles(); return pfIsTransformFeedback?pfIsTransformFeedback(i):GL_FALSE; }
+void glBeginTransformFeedback(GLenum m){ load_gles(); if(pfBeginTransformFeedback) pfBeginTransformFeedback(m); }
+void glEndTransformFeedback(void){ load_gles(); if(pfEndTransformFeedback) pfEndTransformFeedback(); }
+void glPauseTransformFeedback(void){ load_gles(); if(pfPauseTransformFeedback) pfPauseTransformFeedback(); }
+void glResumeTransformFeedback(void){ load_gles(); if(pfResumeTransformFeedback) pfResumeTransformFeedback(); }
+void glTransformFeedbackVaryings(GLuint p,GLsizei n,const GLchar*const*v,GLenum m){ load_gles(); if(pfTransformFeedbackVaryings) pfTransformFeedbackVaryings(p,n,v,m); }
+void glGetTransformFeedbackVarying(GLuint p,GLuint i,GLsizei n,GLsizei*l,GLsizei*s,GLenum*t,GLchar*name){ load_gles(); if(pfGetTransformFeedbackVarying) pfGetTransformFeedbackVarying(p,i,n,l,s,t,name); }
+void glActiveTexture(GLenum u){ load_gles(); if(pfActiveTexture) pfActiveTexture(u); }
+void glTexStorage2DMultisample(GLenum t,GLsizei s,GLenum f,GLsizei w,GLsizei h,GLboolean b){ load_gles(); if(pfTexStorage2DMultisample) pfTexStorage2DMultisample(t,s,f,w,h,b); }
+void glTexStorage3DMultisample(GLenum t,GLsizei s,GLenum f,GLsizei w,GLsizei h,GLsizei d,GLboolean b){ load_gles(); if(pfTexStorage3DMultisample) pfTexStorage3DMultisample(t,s,f,w,h,d,b); }
+void glMinSampleShading(GLfloat v){ load_gles(); if(pfMinSampleShading) pfMinSampleShading(v); }
+void glGetIntegeri_v(GLenum p,GLuint i,GLint*v){ load_gles(); if(pfGetIntegeri_v) pfGetIntegeri_v(p,i,v); }
+void glGetInteger64v(GLenum p,GLint64*v){ load_gles(); if(pfGetInteger64v) pfGetInteger64v(p,v); }
+void glGetInteger64i_v(GLenum p,GLuint i,GLint64*v){ load_gles(); if(pfGetInteger64i_v) pfGetInteger64i_v(p,i,v); }
+void glDepthRangef(GLfloat n,GLfloat f){ load_gles(); if(pfDepthRangef) pfDepthRangef(n,f); }
+void glClearDepthf(GLfloat d){ load_gles(); if(pfClearDepthf) pfClearDepthf(d); }
+void glBlendFuncSeparate(GLenum s,GLenum d,GLenum a,GLenum b){ load_gles(); if(pfBlendFuncSeparate) pfBlendFuncSeparate(s,d,a,b); }
+void glBlendEquation(GLenum m){ load_gles(); if(pfBlendEquation) pfBlendEquation(m); }
+void glBlendEquationSeparate(GLenum a,GLenum b){ load_gles(); if(pfBlendEquationSeparate) pfBlendEquationSeparate(a,b); }
+void glBlendColor(GLfloat r,GLfloat g,GLfloat b,GLfloat a){ load_gles(); if(pfBlendColor) pfBlendColor(r,g,b,a); }
+void glFramebufferTextureLayer(GLenum t,GLenum a,GLuint x,GLint l,GLint lv){ load_gles(); if(pfFramebufferTextureLayer) pfFramebufferTextureLayer(t,a,x,l,lv); }
+GLint glGetFragDataLocation(GLuint p,const GLchar*nm){ load_gles(); return pfGetFragDataLocation?pfGetFragDataLocation(p,nm):-1; }
+void glBindSampler(GLuint u,GLuint s){ load_gles(); if(pfBindSampler) pfBindSampler(u,s); }
+void glGenSamplers(GLsizei n,GLuint*s){ load_gles(); if(pfGenSamplers) pfGenSamplers(n,s); }
+void glDeleteSamplers(GLsizei n,const GLuint*s){ load_gles(); if(pfDeleteSamplers) pfDeleteSamplers(n,s); }
+GLboolean glIsSampler(GLuint s){ load_gles(); return pfIsSampler?pfIsSampler(s):GL_FALSE; }
+void glSamplerParameteri(GLuint s,GLenum p,GLint v){ load_gles(); if(pfSamplerParameteri) pfSamplerParameteri(s,p,v); }
+void glSamplerParameteriv(GLuint s,GLenum p,const GLint*v){ load_gles(); if(pfSamplerParameteriv) pfSamplerParameteriv(s,p,v); }
+void glSamplerParameterf(GLuint s,GLenum p,GLfloat v){ load_gles(); if(pfSamplerParameterf) pfSamplerParameterf(s,p,v); }
+void glSamplerParameterfv(GLuint s,GLenum p,const GLfloat*v){ load_gles(); if(pfSamplerParameterfv) pfSamplerParameterfv(s,p,v); }
+void glGetSamplerParameteriv(GLuint s,GLenum p,GLint*v){ load_gles(); if(pfGetSamplerParameteriv) pfGetSamplerParameteriv(s,p,v); }
+void glGetSamplerParameterfv(GLuint s,GLenum p,GLfloat*v){ load_gles(); if(pfGetSamplerParameterfv) pfGetSamplerParameterfv(s,p,v); }
+
+/* ---- desktop-name forwards to EXT-suffixed GLES entries ----------- */
+void glTexBuffer(GLenum t,GLenum f,GLuint b){ load_gles(); if(pfTexBufferEXT) pfTexBufferEXT(t,f,b); }
+void glTexBufferRange(GLenum t,GLenum f,GLintptr o,GLsizeiptr n,GLuint b){ load_gles(); if(pfTexBufferRangeEXT) pfTexBufferRangeEXT(t,f,o,n,b); }
+void glBufferStorage(GLenum t,GLsizeiptr n,const void*d,GLbitfield f){ load_gles(); if(pfBufferStorageEXT) pfBufferStorageEXT(t,n,d,f); }
+void glCopyImageSubData(GLuint s,GLenum st,GLint sl,GLint sx,GLint sy,GLuint d,GLenum dt,GLint dl,GLint dx,GLint dy,GLsizei w,GLsizei h,GLsizei z)
+    { load_gles(); if(pfCopyImageSubDataEXT) pfCopyImageSubDataEXT(st,s,sl,sx,sy,dt,d,dl,dx,dy,w,h,z); }
+
+/* ---- GLES texture-image parameter forwards (desktop doubles need fv) -*/
+void glTexParameterf(GLenum t,GLenum p,GLfloat v){ load_gles(); if(pfTexParameterf) pfTexParameterf(t,p,v); }
+void glTexParameterfv(GLenum t,GLenum p,const GLfloat*v){ load_gles(); if(pfTexParameterfv) pfTexParameterfv(t,p,v); }
+void glTexParameteri(GLenum t,GLenum p,GLint v){ load_gles(); if(pfTexParameteri) pfTexParameteri(t,p,v); }
+void glTexParameteriv(GLenum t,GLenum p,const GLint*v){ load_gles(); if(pfTexParameteriv) pfTexParameteriv(t,p,v); }
+void glGetTexParameterfv(GLenum t,GLenum p,GLfloat*v){ load_gles(); if(pfGetTexParameterfv) pfGetTexParameterfv(t,p,v); }
+void glGetTexParameteriv(GLenum t,GLenum p,GLint*v){ load_gles(); if(pfGetTexParameteriv) pfGetTexParameteriv(t,p,v); }
+
+/* ---- tessellation patch state (glPatchParameteri is the GLES name) --*/
+static GLint patch_vertices = 3;
+void glPatchParameteri(GLenum p,GLint v)
+{
+    if (p == GL_PATCH_VERTICES) patch_vertices = v;
+    load_gles(); if (pfPatchParameteri) pfPatchParameteri(p,v);
+}
+void glPatchParameterfv(GLenum p,const GLfloat*v)
+{
+    if (p == GL_PATCH_VERTICES && v) patch_vertices = (GLint)v[0];
+    load_gles(); if (pfPatchParameteri) pfPatchParameteri(p,v ? (GLint)v[0] : 0);
+}
+void glGetPatchParameteriv(GLenum p,GLint*v){ if(v) *v = patch_vertices; }
+
+/* ---- multi-draw loop expansion (GLES draws through the same entry    */
+/*       points, so one call per draw; index/vertex pointers are        */
+/*       client-side in ES, no rebasing needed)                          */
+void glMultiDrawArrays(GLenum m,const GLint*first,const GLsizei*count,GLsizei n)
+{
+    load_gles(); if(!pfDrawArrays) return;
+    for(GLsizei i=0;i<n;i++) if(count[i]>0) pfDrawArrays(m,first[i],count[i]);
+}
+void glMultiDrawElements(GLenum m,const GLsizei*count,GLenum t,const void*const*idx,GLsizei n)
+{
+    load_gles(); if(!pfDrawElements) return;
+    for(GLsizei i=0;i<n;i++) if(count[i]>0) pfDrawElements(m,count[i],t,idx?idx[i]:NULL);
+}
+void glMultiDrawElementsBaseVertex(GLenum m,const GLsizei*count,GLenum t,const void*const*idx,GLsizei n,const GLint*bv)
+{
+    load_gles(); if(!pfDrawElementsBaseVertexEXT) return;
+    for(GLsizei i=0;i<n;i++) if(count[i]>0) pfDrawElementsBaseVertexEXT(m,count[i],t,idx?idx[i]:NULL,bv?bv[i]:0);
+}
+void glDrawElementsBaseVertex(GLenum m,GLsizei c,GLenum t,const void*i,GLint bv)
+    { load_gles(); if(pfDrawElementsBaseVertexEXT) pfDrawElementsBaseVertexEXT(m,c,t,i,bv); }
+void glDrawRangeElementsBaseVertex(GLenum m,GLuint s,GLuint e,GLsizei c,GLenum t,const void*i,GLint bv)
+    { load_gles(); if(pfDrawRangeElementsBaseVertexEXT) pfDrawRangeElementsBaseVertexEXT(m,s,e,c,t,i,bv); }
+void glDrawElementsInstancedBaseVertex(GLenum m,GLsizei c,GLenum t,const void*i,GLsizei n,GLint bv)
+    { load_gles(); if(pfDrawElementsInstancedBaseVertexEXT) pfDrawElementsInstancedBaseVertexEXT(m,c,t,i,n,bv); }
+
+/* ---- fail-fast stubs: real symbols, one stderr line, an error is     */
+/*       staged so the app's next glGetError sees GL_INVALID_OPERATION   */
+/*       instead of us letting a no-op silently pass.                    */
+void glTextureView(GLuint t,GLenum tgt,GLuint o,GLenum ifmt,GLuint ml,GLuint bl,GLuint mll)
+    { fprintf(stderr,"glxshim: glTextureView unsupported (no-op)\n"); pending_err=0x0502; }
+void glClearBufferData(GLenum t,GLenum ifmt,GLenum fmt,GLenum typ,const void*d)
+    { fprintf(stderr,"glxshim: glClearBufferData unsupported (no-op)\n"); pending_err=0x0502; }
+void glClearBufferSubData(GLenum t,GLenum ifmt,GLintptr o,GLsizeiptr n,GLenum fmt,GLenum typ,const void*d)
+    { fprintf(stderr,"glxshim: glClearBufferSubData unsupported (no-op)\n"); pending_err=0x0502; }
+void glVertexAttribLFormat(GLuint i,GLint s,GLenum t,GLuint o)
+    { fprintf(stderr,"glxshim: glVertexAttribLFormat unsupported (no-op)\n"); pending_err=0x0502; }
+void glTextureBarrier(void)
+    { fprintf(stderr,"glxshim: glTextureBarrier unsupported (no-op)\n"); pending_err=0x0502; }
+void glPrimitiveRestartIndex(GLuint i)
+    { fprintf(stderr,"glxshim: glPrimitiveRestartIndex unsupported (no-op)\n"); pending_err=0x0502; }
+void glDrawTransformFeedback(GLenum m,GLuint i)
+    { fprintf(stderr,"glxshim: glDrawTransformFeedback unsupported (no-op)\n"); pending_err=0x0502; }
+void glDrawTransformFeedbackInstanced(GLenum m,GLuint i,GLsizei n)
+    { fprintf(stderr,"glxshim: glDrawTransformFeedbackInstanced unsupported (no-op)\n"); pending_err=0x0502; }
+void glDrawTransformFeedbackStream(GLenum m,GLuint i,GLuint s)
+    { fprintf(stderr,"glxshim: glDrawTransformFeedbackStream unsupported (no-op)\n"); pending_err=0x0502; }
+void glDrawTransformFeedbackStreamInstanced(GLenum m,GLuint i,GLuint s,GLsizei n)
+    { fprintf(stderr,"glxshim: glDrawTransformFeedbackStreamInstanced unsupported (no-op)\n"); pending_err=0x0502; }
+void glGetTransformFeedbackiv(GLenum m,GLuint i,GLenum p,GLint*v)
+    { fprintf(stderr,"glxshim: glGetTransformFeedbackiv unsupported (no-op)\n"); pending_err=0x0502; }
+void glGetTransformFeedbacki_v(GLenum m,GLuint i,GLenum p,GLint*v)
+    { fprintf(stderr,"glxshim: glGetTransformFeedbacki_v unsupported (no-op)\n"); pending_err=0x0502; }
+void glGetTransformFeedbacki64_v(GLenum m,GLuint i,GLenum p,GLint64*v)
+    { fprintf(stderr,"glxshim: glGetTransformFeedbacki64_v unsupported (no-op)\n"); pending_err=0x0502; }
+void glSampleMaski(GLuint m,GLbitfield v)
+    { fprintf(stderr,"glxshim: glSampleMaski unsupported (no-op)\n"); pending_err=0x0502; }
+void glDrawBuffers(GLsizei n,const GLenum*b)
+    { fprintf(stderr,"glxshim: glDrawBuffers unsupported (no-op)\n"); pending_err=0x0502; }
+
 /* state we must not blindly forward: report our own identity */
 static const char *shim_ext_string(void);
 void glGetIntegerv(GLenum pname, GLint *data)
 {
     load_gles();
     switch (pname) {
-    case GL_MAJOR_VERSION: if (data) *data = 3; return;
+    case GL_MAJOR_VERSION: if (data) *data = 4; return;
     case GL_MINOR_VERSION: if (data) *data = 3; return;
     case GL_CONTEXT_PROFILE_MASK: if (data) *data = GL_CONTEXT_CORE_PROFILE_BIT; return;
+    case GL_NUM_EXTENSIONS: {
+        /* computed per query so it can never disagree with glGetStringi:
+         * the GLES extension surface may change between pre-/post-context
+         * phases and a stale cached count is what turns a legit
+         * glGetStringi(GL_EXTENSIONS,i) into NULL (then strlen(NULL)). */
+        const char *s = shim_ext_string();
+        int n = 0, in = 0;
+        for (const char *p = s; *p; p++)
+            if (*p == ' ') in = 0;
+            else if (!in) { in = 1; n++; }
+        if (data) *data = n;
+        return;
+    }
     default: if (pfGetIntegerv) pfGetIntegerv(pname, data); return;
     }
 }
@@ -838,12 +1566,28 @@ static const char *shim_ext_string(void)
              " GL_EXT_framebuffer_object GL_EXT_texture_object"
              " GL_OES_mapbuffer GL_OES_framebuffer_object"
              " GL_ARB_texture_non_power_of_two GL_ARB_vertex_buffer_object"
-             " GL_EXT_blend_func_separate GL_EXT_blend_equation_separate");
+             " GL_EXT_blend_func_separate GL_EXT_blend_equation_separate"
+             /* extensions the 4.3 trampoline layer exposes on top of ES3.2 */
+             " GL_ARB_copy_image GL_ARB_buffer_storage GL_ARB_sync"
+             " GL_ARB_compute_shader GL_ARB_shader_storage_buffer_object"
+             " GL_ARB_shader_image_load_store GL_ARB_shader_atomic_counters"
+             " GL_ARB_gpu_shader5 GL_ARB_tessellation_shader"
+             " GL_ARB_geometry_shader4 GL_ARB_texture_buffer_object"
+             " GL_ARB_texture_buffer_range GL_ARB_vertex_attrib_binding"
+             " GL_ARB_transform_feedback2 GL_ARB_transform_feedback3"
+             " GL_ARB_invalidate_subdata GL_ARB_clear_buffer_object"
+             " GL_ARB_get_program_binary GL_ARB_separate_shader_objects"
+             " GL_ARB_program_interface_query GL_ARB_sampler_objects"
+             " GL_KHR_debug");
     return extstr;
 }
 
 const GLubyte *glGetStringi(GLenum name, GLuint index)
 {
+    if (name == GL_VERSION && index == 0)
+        return (const GLubyte *)"4.3 (Core Profile) glxshim 1.0 (GLES3 backend)";
+    if (name == GL_SHADING_LANGUAGE_VERSION && index == 0)
+        return (const GLubyte *)"4.30 glxshim (GLSL ES 3.20 backend)";
     if (name != GL_EXTENSIONS) return NULL;
     const char *s = shim_ext_string();
     GLuint i = 0;
@@ -869,10 +1613,10 @@ const GLubyte *glGetString(GLenum name)
 {
     if (dbg()) fprintf(stderr, "[shim] glGetString(0x%x)\n", name);
     switch (name) {
-    case GL_VERSION:    return (const GLubyte *)"3.3 (Core Profile) glxshim 1.0 (GLES3 backend)";
+    case GL_VERSION:    return (const GLubyte *)"4.3 (Core Profile) glxshim 1.0 (GLES3 backend)";
     case GL_RENDERER:   return (const GLubyte *)"Mali-G57 MC2 (glxshim, GLES3 backend)";
     case GL_VENDOR:     return (const GLubyte *)"Termux X11 glxshim";
-    case GL_SHADING_LANGUAGE_VERSION: return (const GLubyte *)"3.30";
+    case GL_SHADING_LANGUAGE_VERSION: return (const GLubyte *)"4.30 glxshim (GLSL ES 3.20 backend)";
     case GL_EXTENSIONS: return (const GLubyte *)shim_ext_string();
     default:            load_gles(); return NULL;
     }
@@ -1582,7 +2326,64 @@ static const ShimSym shim_syms[] = {
     S(GetUniformLocation), S(Uniform1i), S(Uniform1f), S(Uniform2f),
     S(Uniform3f), S(Uniform4f), S(UniformMatrix4fv), S(VertexAttribPointer),
     S(EnableVertexAttribArray), S(DisableVertexAttribArray), S(GenVertexArrays),
-    S(BindVertexArray), S(DeleteVertexArrays),
+    S(BindVertexArray), S(DeleteVertexArrays), S(GetStringi),
+
+    /* GL 4.3 trampoline layer: our wrappers own these names so that
+     * glXGetProcAddress keeps enumeration consistent with the desktop
+     * identity (native-GLES pass-through would miss the emulations and
+     * the identity overrides). */
+    S(DispatchCompute), S(DispatchComputeIndirect), S(DrawArraysIndirect),
+    S(DrawElementsIndirect), S(ShaderStorageBlockBinding),
+    S(GetProgramResourceIndex), S(GetProgramResourceName),
+    S(GetProgramResourceiv), S(GetProgramInterfaceiv),
+    S(ProgramUniform1f), S(ProgramUniform2f), S(ProgramUniform3f), S(ProgramUniform4f),
+    S(ProgramUniform1i), S(ProgramUniform2i), S(ProgramUniform3i), S(ProgramUniform4i),
+    S(ProgramUniform1ui), S(ProgramUniform2ui), S(ProgramUniform3ui), S(ProgramUniform4ui),
+    S(ProgramUniform1fv), S(ProgramUniform2fv), S(ProgramUniform3fv), S(ProgramUniform4fv),
+    S(ProgramUniform1iv), S(ProgramUniform2iv), S(ProgramUniform3iv), S(ProgramUniform4iv),
+    S(ProgramUniform1uiv), S(ProgramUniform2uiv), S(ProgramUniform3uiv), S(ProgramUniform4uiv),
+    S(ProgramUniformMatrix2fv), S(ProgramUniformMatrix3fv), S(ProgramUniformMatrix4fv),
+    S(ProgramUniformMatrix2x3fv), S(ProgramUniformMatrix3x2fv),
+    S(ProgramUniformMatrix2x4fv), S(ProgramUniformMatrix4x2fv),
+    S(ProgramUniformMatrix3x4fv), S(ProgramUniformMatrix4x3fv),
+    S(BindImageTexture), S(MemoryBarrier), S(MemoryBarrierByRegion),
+    S(VertexAttribFormat), S(VertexAttribIFormat), S(VertexAttribBinding),
+    S(VertexBindingDivisor), S(BindVertexBuffer),
+    S(ClearBufferfv), S(ClearBufferiv), S(ClearBufferuiv), S(ClearBufferfi),
+    S(InvalidateFramebuffer), S(InvalidateSubFramebuffer),
+    S(InvalidateBufferData), S(InvalidateBufferSubData), S(GetInternalformativ),
+    S(FenceSync), S(IsSync), S(DeleteSync), S(ClientWaitSync), S(WaitSync), S(GetSynciv),
+    S(CopyBufferSubData), S(GetBufferParameteriv), S(GetBufferParameteri64v),
+    S(MapBuffer), S(MapBufferRange), S(UnmapBuffer), S(FlushMappedBufferRange),
+    S(BindBufferBase), S(BindBufferRange),
+    S(GetUniformBlockIndex), S(UniformBlockBinding),
+    S(GetActiveUniformBlockiv), S(GetActiveUniformBlockName),
+    S(GetUniformIndices), S(GetActiveUniformsiv),
+    S(BindTransformFeedback), S(DeleteTransformFeedbacks), S(GenTransformFeedbacks),
+    S(IsTransformFeedback), S(BeginTransformFeedback), S(EndTransformFeedback),
+    S(PauseTransformFeedback), S(ResumeTransformFeedback),
+    S(TransformFeedbackVaryings), S(GetTransformFeedbackVarying),
+    S(ActiveTexture), S(TexStorage2DMultisample), S(TexStorage3DMultisample),
+    S(MinSampleShading), S(GetIntegeri_v), S(GetInteger64v), S(GetInteger64i_v),
+    S(DepthRangef), S(ClearDepthf), S(BlendFuncSeparate), S(BlendEquation),
+    S(BlendEquationSeparate), S(BlendColor), S(FramebufferTextureLayer),
+    S(GetFragDataLocation),
+    S(BindSampler), S(GenSamplers), S(DeleteSamplers), S(IsSampler),
+    S(SamplerParameteri), S(SamplerParameteriv), S(SamplerParameterf), S(SamplerParameterfv),
+    S(GetSamplerParameteriv), S(GetSamplerParameterfv),
+    S(TexBuffer), S(TexBufferRange), S(BufferStorage), S(CopyImageSubData),
+    S(TexParameterf), S(TexParameterfv), S(TexParameteri), S(TexParameteriv),
+    S(GetTexParameterfv), S(GetTexParameteriv),
+    S(PatchParameteri), S(PatchParameterfv), S(GetPatchParameteriv),
+    S(MultiDrawArrays), S(MultiDrawElements), S(MultiDrawElementsBaseVertex),
+    S(DrawElementsBaseVertex), S(DrawRangeElementsBaseVertex),
+    S(DrawElementsInstancedBaseVertex),
+    S(TextureView), S(ClearBufferData), S(ClearBufferSubData), S(VertexAttribLFormat),
+    S(TextureBarrier), S(PrimitiveRestartIndex),
+    S(DrawTransformFeedback), S(DrawTransformFeedbackInstanced),
+    S(DrawTransformFeedbackStream), S(DrawTransformFeedbackStreamInstanced),
+    S(GetTransformFeedbackiv), S(GetTransformFeedbacki_v), S(GetTransformFeedbacki64_v),
+    S(SampleMaski), S(DrawBuffers),
     { NULL, NULL }
 };
 
