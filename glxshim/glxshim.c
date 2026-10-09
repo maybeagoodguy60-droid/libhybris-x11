@@ -99,6 +99,8 @@ typedef void (*__GLXextFuncPtr)(void);
 #define GLX_SAMPLE_BUFFERS               0x186A0
 #define GLX_FRAMEBUFFER_SRGB_CAPABLE_ARB 0x20B2
 #define GLX_CONTEXT_PROFILE_MASK         0x9126
+#define GLX_CONTEXT_MAJOR_VERSION_ARB    0x2091
+#define GLX_CONTEXT_MINOR_VERSION_ARB    0x2092
 #define GLX_CONTEXT_CORE_PROFILE_BIT     0x00000001
 #define GLX_BAD_SCREEN                   1
 #define GLX_BAD_ATTRIBUTE                2
@@ -385,6 +387,9 @@ static int cfg_int(ShimFBConfig *c, int attr)
     case GLX_MAX_PBUFFER_PIXELS:   return 16384 * 16384;
     case GLX_SWAP_METHOD:          return GLX_SWAP_COPY;
     case GLX_FRAMEBUFFER_SRGB_CAPABLE_ARB: return True;
+    case GLX_CONTEXT_MAJOR_VERSION_ARB: return 3;
+    case GLX_CONTEXT_MINOR_VERSION_ARB: return 3;
+    case GLX_CONTEXT_PROFILE_MASK:  return GLX_CONTEXT_CORE_PROFILE_BIT;
     default:                       return 0;
     }
 }
@@ -687,7 +692,7 @@ const char *glXQueryServerString(Display *d, int screen, int name)
 {
     (void)d; (void)screen;
     switch (name) {
-    case GLX_EXTENSIONS: return "";
+    case GLX_EXTENSIONS: return glXQueryExtensionsString(d, 0);
     case GLX_VENDOR:     return "Termux X11";
     case GLX_VERSION:    return "1.4";
     default:             return "";
@@ -813,7 +818,7 @@ void glGetIntegerv(GLenum pname, GLint *data)
     load_gles();
     switch (pname) {
     case GL_MAJOR_VERSION: if (data) *data = 3; return;
-    case GL_MINOR_VERSION: if (data) *data = 0; return;
+    case GL_MINOR_VERSION: if (data) *data = 3; return;
     case GL_CONTEXT_PROFILE_MASK: if (data) *data = GL_CONTEXT_CORE_PROFILE_BIT; return;
     default: if (pfGetIntegerv) pfGetIntegerv(pname, data); return;
     }
@@ -864,7 +869,7 @@ const GLubyte *glGetString(GLenum name)
 {
     if (dbg()) fprintf(stderr, "[shim] glGetString(0x%x)\n", name);
     switch (name) {
-    case GL_VERSION:    return (const GLubyte *)"3.0 (Core Profile) glxshim 1.0 (GLES3 backend)";
+    case GL_VERSION:    return (const GLubyte *)"3.3 (Core Profile) glxshim 1.0 (GLES3 backend)";
     case GL_RENDERER:   return (const GLubyte *)"Mali-G57 MC2 (glxshim, GLES3 backend)";
     case GL_VENDOR:     return (const GLubyte *)"Termux X11 glxshim";
     case GL_SHADING_LANGUAGE_VERSION: return (const GLubyte *)"3.30";
