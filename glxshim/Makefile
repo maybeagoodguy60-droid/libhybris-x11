@@ -34,7 +34,7 @@ TARGETS := $(SHIMS_DIR)/libGL.so $(SHIMS_DIR)/libGL.so.1 \
 # make $(call) -- make would expand the argument before $t is set.
 BACKUP_NAME = printf '%s' "$$t" | sed -e 's|^/||' -e 's|/|_|g'
 
-.PHONY: all install uninstall verify clean
+.PHONY: all install uninstall verify clean test
 
 all: libGL.so.1 libGL.so
 
@@ -43,6 +43,18 @@ libGL.so.1: glxshim.c
 
 libGL.so: glxshim.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,-soname,libGL.so -Wl,--no-undefined -o $@ $< $(LDLIBS)
+
+# Phase-4 proof: desktop GLSL 4.30 compute + tessellation really execute.
+# Linked against the freshly built shim and run with the installed lookup
+# paths so it exercises the same libGL a normal app resolves.
+tests/gl43_proof: tests/gl43_proof.c libGL.so
+	$(CC) -O2 -Wall -o $@ tests/gl43_proof.c -L. -Wl,--no-as-needed -lGL \
+	    -lX11 -ldl -Wl,-rpath,$(SHIMS_DIR) -Wl,-rpath,$(HYBRIS_DIR)
+
+test: tests/gl43_proof
+	LD_LIBRARY_PATH=$(SHIMS_DIR):$(HYBRIS_DIR):$$LD_LIBRARY_PATH \
+	    HYBRIS_EGLPLATFORM=$${HYBRIS_EGLPLATFORM:-x11} DISPLAY=$${DISPLAY:-:19} \
+	    ./tests/gl43_proof
 
 install: all
 	@mkdir -p $(BACKUP)
@@ -81,4 +93,4 @@ uninstall:
 	@ldconfig
 
 clean:
-	rm -f libGL.so.1 libGL.so
+	rm -f libGL.so.1 libGL.so tests/gl43_proof

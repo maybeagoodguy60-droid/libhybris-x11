@@ -5,3 +5,4 @@
 libGL.so
 libGL.so.1
 backup-*/
+tests/gl43_proof

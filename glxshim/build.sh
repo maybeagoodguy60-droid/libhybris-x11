@@ -39,6 +39,9 @@ make    CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" LDLIBS="$LDLIBS" install BUILDINFO="
 
 # --- regression smoke after install --------------------------------
 echo "== post-install smoke"
+PREFIX="${PREFIX:-/usr}"
+HYBRIS_DIR="$PREFIX/lib/hybris"
+SHIMS_DIR="$HYBRIS_DIR/gl-shims"
 if glxinfo 2>/dev/null | grep -q glxshim; then
     echo "   PASS glxinfo sees glxshim"
 else
@@ -51,5 +54,20 @@ out=$(timeout 12 glxgears 2>&1) || {
 }
 fps=$(printf '%s\n' "$out" | grep -oE '[0-9.]+ FPS' | tail -1)
 echo "   PASS glxgears fixed-function path ($fps)"
+
+# Phase-4 proof: desktop GLSL 4.30 compute + tessellation actually run on the
+# GLES3.2 backend through the version pinner (SSBO round-trip + tess draw).
+if make --no-print-directory tests/gl43_proof >/dev/null 2>&1; then
+    if out=$(LD_LIBRARY_PATH="$SHIMS_DIR:$HYBRIS_DIR:$LD_LIBRARY_PATH" \
+             HYBRIS_EGLPLATFORM="${HYBRIS_EGLPLATFORM:-x11}" \
+             DISPLAY="${DISPLAY:-:19}" ./tests/gl43_proof 2>&1); then
+        echo "   PASS gl43_proof: compute SSBO + tessellation (4.30 core)"
+    else
+        printf '%s\n' "$out" | sed 's/^/   /' >&2
+        echo "   FAIL gl43_proof: see above" >&2; exit 1
+    fi
+else
+    echo "   WARN gl43_proof failed to build (skipping)" >&2
+fi
 
 echo "== done; install backups under ./backup-*/"

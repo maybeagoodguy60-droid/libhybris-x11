@@ -1041,10 +1041,10 @@ static int pin_glsl(GLenum type, const char *src, char **outp)
         desktop_version = 110;             /* #version present, old-style GLSL */
 
     if (type == GL_COMPUTE_SHADER)              snprintf(target, sizeof target, "310 es");
-    else if (type == GL_GEOMETRY_SHADER ||
+    else if (desktop_version >= 130 ||
+             type == GL_GEOMETRY_SHADER ||
              type == GL_TESS_CONTROL_SHADER ||
              type == GL_TESS_EVALUATION_SHADER) snprintf(target, sizeof target, "320 es");
-    else if (desktop_version >= 130)            snprintf(target, sizeof target, "300 es");
     else                                        snprintf(target, sizeof target, "100");
 
     /* fragment shaders with a fresh GLSL 1.30+ prelude have no gl_FragColor
