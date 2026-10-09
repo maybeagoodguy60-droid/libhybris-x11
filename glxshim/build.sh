@@ -2,7 +2,7 @@
 # Reproducible build + install for the glxshim desktop-GL -> GLES GLX shim.
 #
 # Pins the exact toolchain and flags so a rebuild is *behaviorally* identical
-# to the version that passed tawc-stress (byte-identical .so is not promised:
+# to the version that passed scoria-stress (byte-identical .so is not promised:
 # gcc embeds a build-id and absolute source path unless mapped away).
 #
 # Usage:  sudo ./build.sh [install|check]

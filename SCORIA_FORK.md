@@ -1,12 +1,12 @@
-# tawc libhybris fork
+# Scoria libhybris fork (GPU runtime for the Android tawc app)
 
-This fork is claudeslop: AI-written and AI-maintained as part of the [tawc](https://codeberg.org/sphi/tawc) project.
+This fork is claudeslop: AI-written and AI-maintained as the GPU runtime for the Android [tawc](https://codeberg.org/sphi/tawc) app.
 
 **Fork URL:** https://github.com/wmww/libhybris
 
 ## Purpose
 
-Provide EGL/GLES access to Android GPU drivers from glibc programs running in a chroot, specifically for tawc's Wayland compositor. The key goal is running on **stock Android firmware** (no patched bionic/vendor images).
+Provide EGL/GLES access to Android GPU drivers from glibc programs running in a chroot, specifically for the tawc app's Wayland compositor. The key goal is running on **stock Android firmware** (no patched bionic/vendor images).
 
 ## Patches on top of upstream
 
@@ -100,7 +100,7 @@ Together these give us working EGL 1.5 and Vulkan WSI on Pixel 4a (Adreno 618) a
 
 ## History
 
-Git history is kept clean (commits are rebased/amended, not appended). Each update is tagged `tawc-DD-Mon-YYYY-N` (e.g. `tawc-15-Apr-2026-1`) so previous states can be recovered even after force-pushes.
+Git history is kept clean (commits are rebased/amended, not appended). Each update is tagged `scoria-DD-Mon-YYYY-N` (e.g. `scoria-15-Apr-2026-1`) so previous states can be recovered even after force-pushes.
 
 ## Build
 
